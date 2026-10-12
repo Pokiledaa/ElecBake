@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+repository = "https://github.com/Pokiledaa/ElecBake"
+
+[workspace.dependencies]
+altium-format = { git = "https://github.com/akiselev/altium-cli", rev = "18062d6ce5404fbf022fbd4e9b97f5d5550584c0" }
+altium-format-types = { git = "https://github.com/akiselev/altium-cli", rev = "18062d6ce5404fbf022fbd4e9b97f5d5550584c0" }
+altium-format-render-svg = { git = "https://github.com/akiselev/altium-cli", rev = "18062d6ce5404fbf022fbd4e9b97f5d5550584c0" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
