@@ -4,3 +4,4 @@ pub mod geom;
 pub mod schematic;
 pub mod altium;
 pub mod netlist;
+pub mod diagnostic;
