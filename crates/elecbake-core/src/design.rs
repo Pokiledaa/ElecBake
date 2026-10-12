@@ -28,6 +28,12 @@ pub fn load_design(path: &Path) -> Result<Design> {
     let (name, files, scope, is_project) = match extension(path).as_str() {
         "prjpcb" => {
             let project = altium::load_project(path)?;
+            for warning in &project.warnings {
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticKind::ProjectOptionsIgnored,
+                    warning.clone(),
+                ));
+            }
             for missing in &project.missing {
                 if missing.to_lowercase().ends_with(".schdoc") {
                     diagnostics.push(Diagnostic::new(

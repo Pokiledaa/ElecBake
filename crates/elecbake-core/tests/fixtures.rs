@@ -192,3 +192,29 @@ fn unusable_inputs_are_errors() {
     assert!(load_design(&dir.path().join("notes.txt")).is_err());
     assert!(load_design(&dir.path().join("missing.SchDoc")).is_err());
 }
+
+#[test]
+fn an_unreadable_project_option_becomes_a_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        fixture("Level Shifter.SchDoc"),
+        dir.path().join("Level Shifter.SchDoc"),
+    )
+    .unwrap();
+    let project = dir.path().join("Board.PrjPcb");
+    std::fs::write(
+        &project,
+        "[Design]\r\nVersion=1.0\r\nHierarchyMode=7\r\n\r\n\
+         [Document1]\r\nDocumentPath=Level Shifter.SchDoc\r\n",
+    )
+    .unwrap();
+
+    let design = load_design(&project).unwrap();
+    assert_eq!(design.components.len(), 5);
+    assert!(
+        design
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::ProjectOptionsIgnored)
+    );
+}

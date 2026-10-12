@@ -198,3 +198,27 @@ fn compare_reads_a_windows_1252_reference_file() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("IC5.1 ZZ9.9"));
 }
+
+#[test]
+fn a_bare_file_name_in_the_current_folder_works() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        fixture("Level Shifter.SchDoc"),
+        dir.path().join("shifter.SchDoc"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("u.PrjPcb"),
+        "[Design]\r\nVersion=1.0\r\nHierarchyMode=0\r\n\r\n\
+         [Document1]\r\nDocumentPath=SHIFTER.schdoc\r\n",
+    )
+    .unwrap();
+
+    let output = elecbake()
+        .current_dir(dir.path())
+        .args(["netlist", "u.PrjPcb"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.starts_with("u: 1 sheets, 5 components, "), "{text}");
+}

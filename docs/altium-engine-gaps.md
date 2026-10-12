@@ -17,3 +17,7 @@ Everything ElecBake adds lives in `crates/elecbake-core/src/altium/` unless note
 | Document paths in `.PrjPcb` are Windows-style and case-insensitive | `altium::resolve` |
 | Rendered SVG carries no component or net identifiers | To be solved by an overlay (plan 2) |
 | Buses, bus entries and signal harnesses carry no expanded connectivity | Not expanded; reported as diagnostics |
+| `AltiumProject::open` reads the project file as UTF-8, but Altium writes the Windows code page | A non-UTF-8 file is decoded as Windows-1252 into a scratch copy and opened from there |
+| One unknown option value (for example `HierarchyMode=7`) makes the typed project view fail | The plain document list is used with the automatic net scope, and a diagnostic is raised |
+| Off-sheet connectors are exposed as power objects with a flag | Kept apart from power nets; joined across sheets in flat and global scope only, diagnosed in hierarchical scope |
+| `Repeat(...)` channel sheet symbols are not expanded | Placed once and diagnosed |

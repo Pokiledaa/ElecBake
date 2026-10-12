@@ -13,6 +13,8 @@ pub struct LocalNet {
     pub pins: Vec<(usize, usize)>,
     pub labels: BTreeSet<String>,
     pub power: BTreeSet<String>,
+    /// Names of off-sheet connectors on this net.
+    pub off_sheet: BTreeSet<String>,
     pub ports: BTreeSet<String>,
     /// (sheet symbol index, entry index)
     pub entries: Vec<(usize, usize)>,
@@ -123,17 +125,20 @@ pub fn connect_sheet(sheet: &RawSheet) -> SheetNets {
     }
 
     // Rules 4 and 5: objects sharing a name. Labels, power objects and hidden pins
-    // share one namespace; ports have their own.
-    let mut by_name: HashMap<(bool, String), usize> = HashMap::new();
+    // share one namespace (0); ports (1) and off-sheet connectors (2) have their own.
+    let mut by_name: HashMap<(u8, String), usize> = HashMap::new();
     for (node, item) in items.iter().enumerate() {
         let key = match *item {
-            Item::Label(i) => Some((false, net_key(&sheet.labels[i].text))),
-            Item::Power(i) => Some((false, net_key(&sheet.power[i].name))),
+            Item::Label(i) => Some((0, net_key(&sheet.labels[i].text))),
+            Item::Power(i) => {
+                let space = if sheet.power[i].off_sheet { 2 } else { 0 };
+                Some((space, net_key(&sheet.power[i].name)))
+            }
             Item::Pin(c, p) => sheet.components[c].pins[p]
                 .hidden_net
                 .as_deref()
-                .map(|name| (false, net_key(name))),
-            Item::Port(i) => Some((true, net_key(&sheet.ports[i].name))),
+                .map(|name| (0, net_key(name))),
+            Item::Port(i) => Some((1, net_key(&sheet.ports[i].name))),
             _ => None,
         };
         let Some(key) = key else { continue };
@@ -179,7 +184,12 @@ pub fn connect_sheet(sheet: &RawSheet) -> SheetNets {
                 net.labels.insert(sheet.labels[i].text.trim().to_string());
             }
             Item::Power(i) => {
-                net.power.insert(sheet.power[i].name.trim().to_string());
+                let name = sheet.power[i].name.trim().to_string();
+                if sheet.power[i].off_sheet {
+                    net.off_sheet.insert(name);
+                } else {
+                    net.power.insert(name);
+                }
             }
             Item::Port(i) => {
                 net.ports.insert(sheet.ports[i].name.trim().to_string());
@@ -438,5 +448,20 @@ mod tests {
         let nets = connect_sheet(&sheet("empty.SchDoc"));
         assert!(nets.nets.is_empty());
         assert!(nets.dangling.is_empty());
+    }
+
+    #[test]
+    fn an_off_sheet_connector_is_recorded_separately_from_power_names() {
+        let mut s = sheet("a.SchDoc");
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (50, 0))]),
+        ];
+        s.power = vec![off_sheet("CLK", (0, 0)), off_sheet("clk", (50, 0))];
+        assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
+        let nets = connect_sheet(&s);
+        let net = net_of(&s, &nets, "R1", "1");
+        assert!(net.power.is_empty());
+        assert_eq!(net.off_sheet.iter().collect::<Vec<_>>(), ["CLK", "clk"]);
     }
 }

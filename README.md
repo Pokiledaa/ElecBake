@@ -27,6 +27,17 @@ Net names come from power ports, net labels and ports. A net with no name is
 called `N$<designator>_<pin>`. Buses and signal harnesses are not followed yet;
 affected nets are listed under "Diagnostics".
 
+### Current limits
+
+The netlist has been checked by hand on the sample design, but not yet against a netlist
+exported from Altium for a real project; treat it as unverified until `--compare` reports
+`MATCH` on your own design. Known gaps, each reported under "Diagnostics" when it applies:
+
+- buses and signal harnesses are not followed
+- `Repeat(...)` channel sheet symbols are placed once, not expanded
+- off-sheet connectors link sheets in flat designs only
+- pins of alternate display modes are not filtered out
+
 ### Checking the netlist against Altium
 
 In Altium Designer, with the project open: Design » Netlist For Project » Protel.

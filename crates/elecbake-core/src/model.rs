@@ -168,7 +168,7 @@ pub fn assemble(
     let mut components: BTreeMap<String, Component> = BTreeMap::new();
     for (i, instance) in instances.iter().enumerate() {
         for (c, raw) in sheets[instance.sheet].components.iter().enumerate() {
-            let designator = format!("{}{}", raw.designator, instance.suffix);
+            let designator = netlist.designators[i][c].clone();
             let component = components
                 .entry(designator.clone())
                 .or_insert_with(|| Component {
@@ -206,7 +206,7 @@ pub fn assemble(
         .nets
         .iter()
         .map(|net| {
-            let mut pins: Vec<NetPin> = net
+            let pins: Vec<NetPin> = net
                 .pins
                 .iter()
                 .map(|pin| NetPin {
@@ -214,7 +214,6 @@ pub fn assemble(
                     number: pin.number.clone(),
                 })
                 .collect();
-            pins.dedup();
             let sheet_ids: BTreeSet<&str> = net
                 .instances
                 .iter()
@@ -371,5 +370,29 @@ mod tests {
         let back: Design = serde_json::from_str(&json).unwrap();
         assert_eq!(back.components.len(), 2);
         assert!(json.contains(r#""scope":"hierarchical""#));
+    }
+
+    #[test]
+    fn components_sharing_a_designator_are_listed_separately() {
+        let mut s = sheet("a.SchDoc");
+        s.components = vec![
+            component("R?", &[("1", (0, 0))]),
+            component("R?", &[("1", (0, 0))]),
+        ];
+        let sheets = [s];
+        let design = assemble(
+            "demo".into(),
+            "a.SchDoc".into(),
+            &sheets,
+            build(&sheets, NetScope::Automatic),
+            Vec::new(),
+        );
+        let names: Vec<&str> = design
+            .components
+            .iter()
+            .map(|c| c.designator.as_str())
+            .collect();
+        assert_eq!(names, ["R?", "R?#2"]);
+        assert_eq!(design.nets[0].pins.len(), 2);
     }
 }

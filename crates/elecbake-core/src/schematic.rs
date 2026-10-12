@@ -81,6 +81,8 @@ pub struct RawLabel {
 pub struct RawPower {
     pub name: String,
     pub at: Point,
+    /// An off-sheet connector: it links sheets by name but is not a global power net.
+    pub off_sheet: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -157,6 +159,14 @@ pub(crate) mod testkit {
         RawPower {
             name: name.into(),
             at: pt(at.0, at.1),
+            off_sheet: false,
+        }
+    }
+
+    pub fn off_sheet(name: &str, at: (i64, i64)) -> RawPower {
+        RawPower {
+            off_sheet: true,
+            ..power(name, at)
         }
     }
 

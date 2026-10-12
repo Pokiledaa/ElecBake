@@ -35,6 +35,8 @@ pub struct ProjectFile {
     /// Document paths listed in the project that were not found on disk.
     pub missing: Vec<String>,
     pub hierarchy: ProjectHierarchy,
+    /// Problems reading the project file that did not stop it from loading.
+    pub warnings: Vec<String>,
 }
 
 fn failure(path: &Path, error: impl std::fmt::Display) -> Error {
@@ -184,6 +186,7 @@ pub fn load_sheet(path: &Path) -> Result<RawSheet> {
             SheetObject::PowerObject(p) => raw.power.push(RawPower {
                 name: p.text.clone(),
                 at: point(p.location),
+                off_sheet: p.is_cross_sheet_connector,
             }),
             SheetObject::Port(p) => {
                 let a = point(p.location);
@@ -227,7 +230,12 @@ pub fn render_sheet_svg(path: &Path) -> Result<String> {
 /// Find a file named by a project or sheet symbol. Altium writes Windows-style
 /// relative paths and Windows ignores letter case, so both are tolerated here.
 pub fn resolve(dir: &Path, relative: &str) -> Option<PathBuf> {
-    let mut current = dir.to_path_buf();
+    // A bare file name has an empty parent folder, which means the current one.
+    let mut current = if dir.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        dir.to_path_buf()
+    };
     for part in relative
         .split(['/', '\\'])
         .filter(|p| !p.is_empty() && *p != ".")
@@ -251,28 +259,73 @@ pub fn resolve(dir: &Path, relative: &str) -> Option<PathBuf> {
     current.is_file().then_some(current)
 }
 
+/// Open a project file. `altium-format` reads it as UTF-8, but Altium writes it in the
+/// Windows code page, so a file that is not UTF-8 is converted to a scratch copy first.
+fn open_project(path: &Path) -> Result<altium_format::AltiumProject> {
+    let bytes = std::fs::read(path)?;
+    if std::str::from_utf8(&bytes).is_ok() {
+        return altium_format::AltiumProject::open(path).map_err(|e| failure(path, e));
+    }
+    let (text, _, _) = encoding_rs::WINDOWS_1252.decode(&bytes);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let scratch = std::env::temp_dir().join(format!("elecbake-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(&scratch)?;
+    let copy = scratch.join(path.file_name().unwrap_or_default());
+    let opened = std::fs::write(&copy, text.as_bytes())
+        .map_err(Error::from)
+        .and_then(|()| altium_format::AltiumProject::open(&copy).map_err(|e| failure(path, e)));
+    let _ = std::fs::remove_dir_all(&scratch);
+    opened
+}
+
 /// Read an Altium project file and locate its documents.
 pub fn load_project(path: &Path) -> Result<ProjectFile> {
-    let project = altium_format::AltiumProject::open(path).map_err(|e| failure(path, e))?;
-    let typed = project.project().map_err(|e| failure(path, e))?;
+    let project = open_project(path)?;
     let dir = path.parent().unwrap_or(Path::new("."));
+
+    let mut warnings = Vec::new();
+    let (hierarchy, documents): (ProjectHierarchy, Vec<String>) = match project.project() {
+        Ok(typed) => (
+            match typed.hierarchy_mode {
+                FlattenMode::Flat => ProjectHierarchy::Flat,
+                FlattenMode::HierarchicalGlobalPorts => ProjectHierarchy::Hierarchical,
+                FlattenMode::HierarchicalStrict => ProjectHierarchy::StrictHierarchical,
+                FlattenMode::Global => ProjectHierarchy::Global,
+                _ => ProjectHierarchy::Automatic,
+            },
+            typed.documents.iter().map(|d| d.path.clone()).collect(),
+        ),
+        // One unreadable option must not hide the documents: fall back to the plain list.
+        Err(error) => {
+            warnings.push(format!(
+                "the project's options could not be read ({error}); \
+                 the automatic net scope is used instead"
+            ));
+            (
+                ProjectHierarchy::Automatic,
+                project
+                    .document_paths()
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect(),
+            )
+        }
+    };
 
     let mut loaded = ProjectFile {
         name: project.name().to_string(),
         schematics: Vec::new(),
         other_documents: Vec::new(),
         missing: Vec::new(),
-        hierarchy: match typed.hierarchy_mode {
-            FlattenMode::Flat => ProjectHierarchy::Flat,
-            FlattenMode::HierarchicalGlobalPorts => ProjectHierarchy::Hierarchical,
-            FlattenMode::HierarchicalStrict => ProjectHierarchy::StrictHierarchical,
-            FlattenMode::Global => ProjectHierarchy::Global,
-            _ => ProjectHierarchy::Automatic,
-        },
+        hierarchy,
+        warnings,
     };
-    for document in &typed.documents {
-        match resolve(dir, &document.path) {
-            None => loaded.missing.push(document.path.clone()),
+    for document in &documents {
+        match resolve(dir, document) {
+            None => loaded.missing.push(document.clone()),
             Some(found) => {
                 let is_schematic = found
                     .extension()
@@ -434,5 +487,49 @@ mod tests {
         assert_eq!(loaded.other_documents, [dir.path().join("Board.PcbDoc")]);
         assert_eq!(loaded.missing, ["Gone.SchDoc"]);
         assert_eq!(loaded.hierarchy, ProjectHierarchy::Flat);
+    }
+
+    #[test]
+    fn resolves_relative_to_the_current_directory_when_the_folder_is_empty() {
+        assert_eq!(
+            resolve(Path::new(""), "cargo.TOML"),
+            Some(PathBuf::from("./Cargo.toml"))
+        );
+    }
+
+    #[test]
+    fn reads_a_project_file_that_is_not_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Main.SchDoc"), b"x").unwrap();
+        let project = dir.path().join("Demo.PrjPcb");
+        std::fs::write(
+            &project,
+            b"[Design]\r\nVersion=1.0\r\nHierarchyMode=0\r\nOutputPath=Ausg\xe4nge\r\n\r\n\
+              [Document1]\r\nDocumentPath=Main.SchDoc\r\n",
+        )
+        .unwrap();
+
+        let loaded = load_project(&project).unwrap();
+        assert_eq!(loaded.name, "Demo");
+        assert_eq!(loaded.schematics, [dir.path().join("Main.SchDoc")]);
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+    }
+
+    #[test]
+    fn an_unreadable_project_option_does_not_stop_the_documents_from_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Main.SchDoc"), b"x").unwrap();
+        let project = dir.path().join("Demo.PrjPcb");
+        std::fs::write(
+            &project,
+            "[Design]\r\nVersion=1.0\r\nHierarchyMode=7\r\n\r\n\
+             [Document1]\r\nDocumentPath=Main.SchDoc\r\n",
+        )
+        .unwrap();
+
+        let loaded = load_project(&project).unwrap();
+        assert_eq!(loaded.schematics, [dir.path().join("Main.SchDoc")]);
+        assert_eq!(loaded.hierarchy, ProjectHierarchy::Automatic);
+        assert_eq!(loaded.warnings.len(), 1);
     }
 }

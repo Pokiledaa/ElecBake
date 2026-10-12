@@ -382,6 +382,7 @@ dependencies = [
  "altium-format",
  "altium-format-render-svg",
  "altium-format-types",
+ "encoding_rs",
  "serde",
  "serde_json",
  "tempfile",

@@ -1,6 +1,6 @@
 //! Findings derived from the finished netlist.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::build::{NetEntry, SheetInstance};
 use super::sheet::SheetNets;
@@ -11,6 +11,7 @@ pub(super) fn diagnose(
     sheets: &[RawSheet],
     local: &[SheetNets],
     instances: &[SheetInstance],
+    designators: &[Vec<String>],
     nets: &[NetEntry],
     out: &mut Vec<Diagnostic>,
 ) {
@@ -94,6 +95,38 @@ pub(super) fn diagnose(
                 );
             }
             _ => {}
+        }
+    }
+
+    // Two pins with one number on a single placement usually mean alternate display
+    // modes, whose pins the file engine does not yet filter out.
+    for (i, instance) in instances.iter().enumerate() {
+        for (c, component) in sheets[instance.sheet].components.iter().enumerate() {
+            let mut seen: BTreeSet<&str> = BTreeSet::new();
+            let mut repeated: BTreeSet<&str> = BTreeSet::new();
+            for pin in &component.pins {
+                if !seen.insert(pin.number.as_str()) {
+                    repeated.insert(pin.number.as_str());
+                }
+            }
+            if repeated.is_empty() {
+                continue;
+            }
+            let numbers: Vec<String> = repeated.iter().map(|n| format!("'{n}'")).collect();
+            out.push(
+                Diagnostic::new(
+                    DiagnosticKind::DuplicatePinNumber,
+                    format!(
+                        "component {} has more than one pin numbered {}; it may have alternate \
+                         display modes, which are not filtered yet, so some of these pins may \
+                         not really be on the sheet",
+                        designators[i][c],
+                        numbers.join(", ")
+                    ),
+                )
+                .on_sheet(&instance.id)
+                .designator(&designators[i][c]),
+            );
         }
     }
 
@@ -262,5 +295,19 @@ mod tests {
             1
         );
         assert!(of_kind(&netlist.diagnostics, DiagnosticKind::DuplicateDesignator).is_empty());
+    }
+
+    #[test]
+    fn two_pins_with_one_number_on_a_placement_are_reported() {
+        let mut s = sheet("a.SchDoc");
+        s.components = vec![component(
+            "U1",
+            &[("3", (0, 0)), ("3", (0, 10)), ("4", (0, 20))],
+        )];
+        let netlist = build(&[s], NetScope::Automatic);
+        let found = of_kind(&netlist.diagnostics, DiagnosticKind::DuplicatePinNumber);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].designators, ["U1"]);
+        assert!(found[0].message.contains("'3'"), "{}", found[0].message);
     }
 }

@@ -64,6 +64,10 @@ pub struct Netlist {
     /// The scope actually applied; never `Automatic`.
     pub scope: NetScope,
     pub instances: Vec<SheetInstance>,
+    /// The designator of every placed component, as `[instance][component]`. It is the
+    /// sheet's designator plus the instance suffix; a component repeating a designator
+    /// already in use gets `#2`, `#3`, ... so that it stays a separate component.
+    pub designators: Vec<Vec<String>>,
     pub nets: Vec<NetEntry>,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -134,6 +138,19 @@ impl Hierarchy<'_> {
         open.push(sheet);
         for s in 0..self.sheets[sheet].symbols.len() {
             let symbol = &self.sheets[sheet].symbols[s];
+            if symbol.name.trim().to_uppercase().starts_with("REPEAT(") {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticKind::RepeatedSheet,
+                        format!(
+                            "sheet symbol '{}' repeats '{}' as channels; the channels are \
+                             not expanded, so the sheet is placed once",
+                            symbol.name, symbol.file_name
+                        ),
+                    )
+                    .on_sheet(&self.instances[me].id),
+                );
+            }
             match self.by_file.get(&file_key(&symbol.file_name)).copied() {
                 None => self.diagnostics.push(
                     Diagnostic::new(
@@ -169,18 +186,16 @@ fn instantiate(sheets: &[RawSheet]) -> (Vec<SheetInstance>, Vec<Diagnostic>) {
         .map(|(i, s)| (file_key(&s.path.to_string_lossy()), i))
         .collect();
     let mut uses = vec![0usize; sheets.len()];
-    for sheet in sheets {
+    for (i, sheet) in sheets.iter().enumerate() {
         for symbol in &sheet.symbols {
-            if let Some(&child) = by_file.get(&file_key(&symbol.file_name)) {
-                uses[child] += 1;
+            match by_file.get(&file_key(&symbol.file_name)) {
+                // A sheet referring to itself is a loop, not a second use.
+                Some(&child) if child != i => uses[child] += 1,
+                _ => {}
             }
         }
     }
-    let mut tops: Vec<usize> = (0..sheets.len()).filter(|&i| uses[i] == 0).collect();
-    if tops.is_empty() && !sheets.is_empty() {
-        // Every sheet is referenced by another, so the references form a loop.
-        tops.push(0);
-    }
+    let tops: Vec<usize> = (0..sheets.len()).filter(|&i| uses[i] == 0).collect();
 
     let mut hierarchy = Hierarchy {
         sheets,
@@ -192,7 +207,43 @@ fn instantiate(sheets: &[RawSheet]) -> (Vec<SheetInstance>, Vec<Diagnostic>) {
     for top in tops {
         hierarchy.add(top, None, &mut Vec::new());
     }
+    // Sheets that only refer to each other in a loop are reached from no top sheet.
+    // Load them anyway; the loop itself is reported where it closes.
+    for sheet in 0..sheets.len() {
+        if !hierarchy.instances.iter().any(|i| i.sheet == sheet) {
+            hierarchy.add(sheet, None, &mut Vec::new());
+        }
+    }
     (hierarchy.instances, hierarchy.diagnostics)
+}
+
+/// The designator of every placed component, as `[instance][component]`.
+fn assign_designators(sheets: &[RawSheet], instances: &[SheetInstance]) -> Vec<Vec<String>> {
+    // Parts already placed under each designator. A different part of the same
+    // designator is the same multi-part component; the same part again is another one.
+    let mut placed: HashMap<String, Vec<i32>> = HashMap::new();
+    let mut repeats: HashMap<String, usize> = HashMap::new();
+    instances
+        .iter()
+        .map(|instance| {
+            sheets[instance.sheet]
+                .components
+                .iter()
+                .map(|component| {
+                    let base = format!("{}{}", component.designator, instance.suffix);
+                    let parts = placed.entry(base.clone()).or_default();
+                    if parts.contains(&component.part_id) {
+                        let n = repeats.entry(base.clone()).or_insert(1);
+                        *n += 1;
+                        format!("{base}#{n}")
+                    } else {
+                        parts.push(component.part_id);
+                        base
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
 
 fn effective_scope(sheets: &[RawSheet], scope: NetScope) -> NetScope {
@@ -228,6 +279,7 @@ fn join_by_name(
 pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     let local: Vec<SheetNets> = sheets.iter().map(connect_sheet).collect();
     let (instances, mut diagnostics) = instantiate(sheets);
+    let designators = assign_designators(sheets, &instances);
     let scope = effective_scope(sheets, scope);
 
     // One node per (instance, local net).
@@ -241,6 +293,7 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
 
     let mut named: HashMap<String, usize> = HashMap::new();
     let mut ported: HashMap<String, usize> = HashMap::new();
+    let mut linked: HashMap<String, usize> = HashMap::new();
     for (i, instance) in instances.iter().enumerate() {
         for (n, net) in local[instance.sheet].nets.iter().enumerate() {
             let node = offset[i] + n;
@@ -257,6 +310,24 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             if matches!(scope, NetScope::Global | NetScope::Flat) {
                 for name in &net.ports {
                     join_by_name(&mut groups, &mut ported, name, node);
+                }
+                for name in &net.off_sheet {
+                    join_by_name(&mut groups, &mut linked, name, node);
+                }
+            } else {
+                // In a hierarchical design an off-sheet connector only links the sheets
+                // under one sheet symbol. That grouping is not modelled, so it stays local.
+                for name in &net.off_sheet {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticKind::OffSheetNotFollowed,
+                            format!(
+                                "off-sheet connector '{name}' is not followed to other sheets \
+                                 in a hierarchical design"
+                            ),
+                        )
+                        .on_sheet(&instance.id),
+                    );
                 }
             }
         }
@@ -333,6 +404,8 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     // Where each net's name came from: (class, sheet depth, instance). A lower class
     // and a shallower sheet make a stronger name. Parallel to `nets`.
     let mut sources: Vec<(usize, usize, usize)> = Vec::new();
+    // Nets carrying several names of their strongest class: (net index, the other names).
+    let mut several: Vec<(usize, Vec<String>)> = Vec::new();
     for parts in members.into_values() {
         let mut entry = NetEntry {
             name: String::new(),
@@ -353,7 +426,7 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             let net = &local[instance.sheet].nets[n];
             for &(c, p) in &net.pins {
                 entry.pins.push(PinRef {
-                    designator: format!("{}{}", sheet.components[c].designator, instance.suffix),
+                    designator: designators[i][c].clone(),
                     number: sheet.components[c].pins[p].number.clone(),
                     instance: i,
                     component: c,
@@ -374,6 +447,7 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             candidates[1].extend(
                 net.labels
                     .iter()
+                    .chain(&net.off_sheet)
                     .map(|name| (instance.depth, name.clone(), i)),
             );
             candidates[2].extend(
@@ -401,22 +475,12 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
                 let distinct: BTreeSet<String> =
                     class.iter().map(|(_, name, _)| net_key(name)).collect();
                 if distinct.len() > 1 {
-                    let others: Vec<&str> = class
+                    let others = class
                         .iter()
-                        .map(|(_, name, _)| name.as_str())
+                        .map(|(_, name, _)| name.clone())
                         .filter(|name| net_key(name) != net_key(&entry.name))
                         .collect();
-                    diagnostics.push(
-                        Diagnostic::new(
-                            DiagnosticKind::MultipleNetNames,
-                            format!(
-                                "net '{}' also carries the name(s) {}; they are connected together",
-                                entry.name,
-                                others.join(", ")
-                            ),
-                        )
-                        .net(&entry.name),
-                    );
+                    several.push((nets.len(), others));
                 }
             }
             None => {
@@ -446,35 +510,61 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             .expect("a net shares its own name");
         let keeps_name =
             strength(n) == best && rivals.iter().filter(|&&i| strength(i) == best).count() == 1;
-        if rivals.len() > 1 && !keeps_name {
-            let sheet = &instances[sources[n].2].id;
-            let renamed = format!("{}@{}", nets[n].name, sheet);
+        let qualified = rivals.len() > 1 && !keeps_name;
+        let sheet = &instances[sources[n].2].id;
+
+        let mut name = if qualified {
+            format!("{}@{}", nets[n].name, sheet)
+        } else {
+            nets[n].name.clone()
+        };
+        while !taken.insert(net_key(&name)) {
+            name.push('\'');
+        }
+        if qualified {
             diagnostics.push(
                 Diagnostic::new(
                     DiagnosticKind::DuplicateNetName,
                     format!(
-                        "the name '{}' is used by {} separate nets; this one is shown as '{renamed}'",
+                        "the name '{}' is used by {} separate nets; this one is shown as '{name}'",
                         nets[n].name,
                         rivals.len()
                     ),
                 )
                 .on_sheet(sheet)
-                .net(&renamed),
+                .net(&name),
             );
-            nets[n].name = renamed;
         }
+        nets[n].name = name;
     }
-    for net in &mut nets {
-        while !taken.insert(net_key(&net.name)) {
-            net.name.push('\'');
-        }
+    // Reported only now, so that the diagnostics carry the nets' final names.
+    for (n, others) in several {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticKind::MultipleNetNames,
+                format!(
+                    "net '{}' also carries the name(s) {}; they are connected together",
+                    nets[n].name,
+                    others.join(", ")
+                ),
+            )
+            .net(&nets[n].name),
+        );
     }
     nets.sort_by(|a, b| a.name.cmp(&b.name));
 
-    super::diagnose::diagnose(sheets, &local, &instances, &nets, &mut diagnostics);
+    super::diagnose::diagnose(
+        sheets,
+        &local,
+        &instances,
+        &designators,
+        &nets,
+        &mut diagnostics,
+    );
     Netlist {
         scope,
         instances,
+        designators,
         nets,
         diagnostics,
     }
@@ -801,6 +891,119 @@ mod tests {
             netlist.nets.is_empty()
                 && netlist.instances.is_empty()
                 && netlist.diagnostics.is_empty()
+        );
+    }
+
+    #[test]
+    fn off_sheet_connectors_join_sheets_in_flat_scope() {
+        let mut a = sheet_with_pin("a.SchDoc", "R1");
+        a.power = vec![off_sheet("CLK", (10, 0))];
+        let mut b = sheet_with_pin("b.SchDoc", "R2");
+        b.power = vec![off_sheet("CLK", (10, 0))];
+        let flat = build(&[a, b], NetScope::Flat);
+        assert_eq!(pins(&flat, "CLK"), "R1.1 R2.1");
+    }
+
+    #[test]
+    fn off_sheet_connectors_do_not_join_repeated_channels() {
+        let mut parent = sheet("top.SchDoc");
+        parent.symbols = vec![
+            symbol("A", "ch.SchDoc", &[("X", (100, 0))]),
+            symbol("B", "ch.SchDoc", &[("X", (100, 50))]),
+        ];
+        let mut child = sheet_with_pin("ch.SchDoc", "R1");
+        child.power = vec![off_sheet("IN", (10, 0))];
+        let netlist = build(&[parent, child], NetScope::Automatic);
+        assert_eq!(names(&netlist), ["IN@top/A", "IN@top/B"]);
+        assert!(kinds(&netlist).contains(&DiagnosticKind::OffSheetNotFollowed));
+    }
+
+    #[test]
+    fn a_looped_sheet_that_nothing_else_reaches_is_still_loaded() {
+        let top = sheet_with_pin("top.SchDoc", "R1");
+        let mut b = sheet_with_pin("b.SchDoc", "R2");
+        b.symbols = vec![symbol("C", "c.SchDoc", &[])];
+        let mut c = sheet_with_pin("c.SchDoc", "R3");
+        c.symbols = vec![symbol("B", "b.SchDoc", &[])];
+        let netlist = build(&[top, b, c], NetScope::Automatic);
+        let all: Vec<&str> = netlist
+            .nets
+            .iter()
+            .flat_map(|n| n.pins.iter().map(|p| p.designator.as_str()))
+            .collect();
+        assert_eq!(all, ["R1", "R2", "R3"]);
+        assert!(kinds(&netlist).contains(&DiagnosticKind::HierarchyCycle));
+    }
+
+    #[test]
+    fn a_child_that_also_refers_to_itself_keeps_plain_designators() {
+        let mut top = sheet("top.SchDoc");
+        top.symbols = vec![symbol("SUB", "x.SchDoc", &[])];
+        let mut x = sheet_with_pin("x.SchDoc", "R2");
+        x.symbols = vec![symbol("SELF", "x.SchDoc", &[])];
+        let netlist = build(&[top, x], NetScope::Automatic);
+        assert_eq!(netlist.nets[0].pins[0].designator, "R2");
+    }
+
+    #[test]
+    fn a_repeat_sheet_symbol_is_reported_as_not_expanded() {
+        let mut top = sheet("top.SchDoc");
+        top.symbols = vec![symbol("Repeat(CH,1,8)", "ch.SchDoc", &[])];
+        let ch = sheet_with_pin("ch.SchDoc", "R1");
+        let netlist = build(&[top, ch], NetScope::Automatic);
+        let found: Vec<&Diagnostic> = netlist
+            .diagnostics
+            .iter()
+            .filter(|d| d.kind == DiagnosticKind::RepeatedSheet)
+            .collect();
+        assert_eq!(found.len(), 1);
+        assert!(
+            found[0].message.contains("not expanded"),
+            "{}",
+            found[0].message
+        );
+    }
+
+    #[test]
+    fn components_sharing_a_designator_stay_separate() {
+        let mut s = sheet("a.SchDoc");
+        s.components = vec![
+            component("R?", &[("1", (0, 0))]),
+            component("R?", &[("1", (50, 0))]),
+            component("R?", &[("1", (90, 0))]),
+        ];
+        let netlist = build(&[s], NetScope::Automatic);
+        assert_eq!(names(&netlist), ["N$R?#2_1", "N$R?#3_1", "N$R?_1"]);
+        assert!(!kinds(&netlist).contains(&DiagnosticKind::DuplicateNetName));
+        assert_eq!(netlist.designators, [["R?", "R?#2", "R?#3"]]);
+    }
+
+    #[test]
+    fn diagnostics_refer_to_the_final_net_names() {
+        let mut a = sheet_with_pin("a.SchDoc", "R1");
+        a.labels = vec![label("X", (2, 0)), label("Y", (5, 0))];
+        let mut b = sheet_with_pin("b.SchDoc", "R2");
+        b.labels = vec![label("X", (2, 0)), label("Y", (5, 0))];
+        let netlist = build(&[a, b], NetScope::Flat);
+        assert_eq!(names(&netlist), ["X@a", "X@b"]);
+        for diagnostic in &netlist.diagnostics {
+            for net in &diagnostic.nets {
+                assert!(
+                    names(&netlist).contains(&net.as_str()),
+                    "{diagnostic:?} names a net that does not exist"
+                );
+            }
+        }
+        let multiple: Vec<&Diagnostic> = netlist
+            .diagnostics
+            .iter()
+            .filter(|d| d.kind == DiagnosticKind::MultipleNetNames)
+            .collect();
+        assert_eq!(multiple.len(), 2);
+        assert!(
+            multiple[0].message.starts_with("net 'X@a' also carries"),
+            "{}",
+            multiple[0].message
         );
     }
 }

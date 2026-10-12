@@ -18,6 +18,9 @@ pub enum DiagnosticKind {
     MultipleNetNames,
     DuplicateNetName,
     BusNotExpanded,
+    OffSheetNotFollowed,
+    DuplicatePinNumber,
+    ProjectOptionsIgnored,
 }
 
 impl DiagnosticKind {
@@ -34,6 +37,9 @@ impl DiagnosticKind {
             Self::MultipleNetNames => "multiple_net_names",
             Self::DuplicateNetName => "duplicate_net_name",
             Self::BusNotExpanded => "bus_not_expanded",
+            Self::OffSheetNotFollowed => "off_sheet_not_followed",
+            Self::DuplicatePinNumber => "duplicate_pin_number",
+            Self::ProjectOptionsIgnored => "project_options_ignored",
         }
     }
 }
