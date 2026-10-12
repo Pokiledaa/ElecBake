@@ -2,3 +2,4 @@
 pub mod error;
 pub mod geom;
 pub mod schematic;
+pub mod altium;
