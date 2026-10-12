@@ -13,8 +13,8 @@ use altium_format_types::sch::{LeftRightSide, PinElectricalType, PortArrowStyle}
 use crate::error::{Error, Result};
 use crate::geom::{Point, Rect};
 use crate::schematic::{
-    PinKind, RawComponent, RawEntry, RawLabel, RawPin, RawPort, RawPower, RawSheet,
-    RawSheetSymbol, RawWire,
+    PinKind, RawComponent, RawEntry, RawLabel, RawPin, RawPort, RawPower, RawSheet, RawSheetSymbol,
+    RawWire,
 };
 
 /// How a project says nets connect across sheets (Altium's "net identifier scope").
@@ -38,7 +38,10 @@ pub struct ProjectFile {
 }
 
 fn failure(path: &Path, error: impl std::fmt::Display) -> Error {
-    Error::Altium { path: path.to_path_buf(), message: error.to_string() }
+    Error::Altium {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    }
 }
 
 fn point(p: CoordPoint) -> Point {
@@ -68,10 +71,16 @@ fn pin_kind(kind: PinElectricalType) -> PinKind {
 }
 
 fn component(c: &SchDocComponent) -> RawComponent {
-    let parameters: Vec<(String, String)> =
-        c.parameters().iter().map(|p| (p.name.clone(), p.text.clone())).collect();
+    let parameters: Vec<(String, String)> = c
+        .parameters()
+        .iter()
+        .map(|p| (p.name.clone(), p.text.clone()))
+        .collect();
     let lookup = |name: &str| {
-        parameters.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone())
+        parameters
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
     };
     // A comment such as "=Part Number" means "use the Part Number parameter".
     let comment = lookup("Comment")
@@ -135,7 +144,10 @@ fn symbol(s: &SheetSymbol) -> RawSheetSymbol {
                 LeftRightSide::Bottom => Point::new(origin.x + d, origin.y - height),
                 _ => Point::new(origin.x, origin.y - d),
             };
-            RawEntry { name: e.name.clone(), at }
+            RawEntry {
+                name: e.name.clone(),
+                at,
+            }
         })
         .collect();
     RawSheetSymbol {
@@ -153,21 +165,26 @@ fn symbol(s: &SheetSymbol) -> RawSheetSymbol {
 pub fn load_sheet(path: &Path) -> Result<RawSheet> {
     let doc = altium_format::SchDoc::open(path).map_err(|e| failure(path, e))?;
     let sheet = doc.sheet().map_err(|e| failure(path, e))?;
-    let mut raw = RawSheet { path: path.to_path_buf(), ..Default::default() };
+    let mut raw = RawSheet {
+        path: path.to_path_buf(),
+        ..Default::default()
+    };
 
     for object in &sheet.objects {
         match object {
             SheetObject::Component(c) => raw.components.push(component(c)),
-            SheetObject::Wire(w) => {
-                raw.wires.push(RawWire { vertices: w.vertices.iter().map(|&v| point(v)).collect() })
-            }
+            SheetObject::Wire(w) => raw.wires.push(RawWire {
+                vertices: w.vertices.iter().map(|&v| point(v)).collect(),
+            }),
             SheetObject::Junction(j) => raw.junctions.push(point(j.location)),
-            SheetObject::NetLabel(l) => {
-                raw.labels.push(RawLabel { text: l.text.clone(), at: point(l.location) })
-            }
-            SheetObject::PowerObject(p) => {
-                raw.power.push(RawPower { name: p.text.clone(), at: point(p.location) })
-            }
+            SheetObject::NetLabel(l) => raw.labels.push(RawLabel {
+                text: l.text.clone(),
+                at: point(l.location),
+            }),
+            SheetObject::PowerObject(p) => raw.power.push(RawPower {
+                name: p.text.clone(),
+                at: point(p.location),
+            }),
             SheetObject::Port(p) => {
                 let a = point(p.location);
                 let width = p.width.raw() as i64;
@@ -178,14 +195,23 @@ pub fn load_sheet(path: &Path) -> Result<RawSheet> {
                         | PortArrowStyle::Bottom
                         | PortArrowStyle::TopBottom
                 );
-                let b = if vertical { Point::new(a.x, a.y + width) } else { Point::new(a.x + width, a.y) };
-                raw.ports.push(RawPort { name: p.name.clone(), ends: [a, b] });
+                let b = if vertical {
+                    Point::new(a.x, a.y + width)
+                } else {
+                    Point::new(a.x + width, a.y)
+                };
+                raw.ports.push(RawPort {
+                    name: p.name.clone(),
+                    ends: [a, b],
+                });
             }
             SheetObject::SheetSymbol(s) => raw.symbols.push(symbol(s)),
             SheetObject::NoConnect(n) => raw.no_connects.push(point(n.location)),
             SheetObject::BusEntry(b) => raw.bus_entries.push([point(b.location), point(b.corner)]),
             SheetObject::Bus(_) => raw.bus_count += 1,
-            SheetObject::HarnessConnector(_) | SheetObject::SignalHarness(_) => raw.harness_count += 1,
+            SheetObject::HarnessConnector(_) | SheetObject::SignalHarness(_) => {
+                raw.harness_count += 1
+            }
             _ => {}
         }
     }
@@ -202,7 +228,10 @@ pub fn render_sheet_svg(path: &Path) -> Result<String> {
 /// relative paths and Windows ignores letter case, so both are tolerated here.
 pub fn resolve(dir: &Path, relative: &str) -> Option<PathBuf> {
     let mut current = dir.to_path_buf();
-    for part in relative.split(['/', '\\']).filter(|p| !p.is_empty() && *p != ".") {
+    for part in relative
+        .split(['/', '\\'])
+        .filter(|p| !p.is_empty() && *p != ".")
+    {
         let exact = current.join(part);
         if exact.exists() {
             current = exact;
@@ -211,7 +240,12 @@ pub fn resolve(dir: &Path, relative: &str) -> Option<PathBuf> {
         let found = std::fs::read_dir(&current)
             .ok()?
             .filter_map(|entry| entry.ok())
-            .find(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case(part))?;
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(part)
+            })?;
         current = found.path();
     }
     current.is_file().then_some(current)
@@ -262,14 +296,22 @@ mod tests {
     use crate::geom::Point;
 
     fn fixture(name: &str) -> PathBuf {
-        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/altiumsharp")).join(name)
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/altiumsharp"
+        ))
+        .join(name)
     }
 
     #[test]
     fn loads_components_with_absolute_pin_hot_spots() {
         let sheet = load_sheet(&fixture("Level Shifter.SchDoc")).unwrap();
         assert_eq!(sheet.components.len(), 5);
-        let ic5 = sheet.components.iter().find(|c| c.designator == "IC5").unwrap();
+        let ic5 = sheet
+            .components
+            .iter()
+            .find(|c| c.designator == "IC5")
+            .unwrap();
         let pin2 = ic5.pins.iter().find(|p| p.number == "2").unwrap();
         assert_eq!(pin2.base, Point::new(52_000_000, 37_000_000));
         assert_eq!(pin2.hot, Point::new(49_000_000, 37_000_000));
@@ -278,9 +320,17 @@ mod tests {
     #[test]
     fn resolves_a_comment_that_refers_to_another_parameter() {
         let sheet = load_sheet(&fixture("Level Shifter.SchDoc")).unwrap();
-        let ic5 = sheet.components.iter().find(|c| c.designator == "IC5").unwrap();
+        let ic5 = sheet
+            .components
+            .iter()
+            .find(|c| c.designator == "IC5")
+            .unwrap();
         assert_eq!(ic5.comment.as_deref(), Some("TXU0304PWR"));
-        let c17 = sheet.components.iter().find(|c| c.designator == "C17").unwrap();
+        let c17 = sheet
+            .components
+            .iter()
+            .find(|c| c.designator == "C17")
+            .unwrap();
         assert_eq!(c17.comment.as_deref(), Some("1 µF"));
     }
 
@@ -289,14 +339,23 @@ mod tests {
         let sheet = load_sheet(&fixture("Level Shifter.SchDoc")).unwrap();
         assert_eq!(sheet.ports.len(), 8);
         let port = sheet.ports.iter().find(|p| p.name == "CS_3V3").unwrap();
-        assert_eq!(port.ends, [Point::new(39_000_000, 37_000_000), Point::new(46_000_000, 37_000_000)]);
+        assert_eq!(
+            port.ends,
+            [
+                Point::new(39_000_000, 37_000_000),
+                Point::new(46_000_000, 37_000_000)
+            ]
+        );
     }
 
     #[test]
     fn loads_sheet_symbols_with_entry_positions() {
         let sheet = load_sheet(&fixture("Overview.SchDoc")).unwrap();
-        let names: Vec<(&str, &str)> =
-            sheet.symbols.iter().map(|s| (s.name.as_str(), s.file_name.as_str())).collect();
+        let names: Vec<(&str, &str)> = sheet
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.file_name.as_str()))
+            .collect();
         assert_eq!(
             names,
             [
@@ -316,8 +375,14 @@ mod tests {
     #[test]
     fn every_sample_sheet_loads_and_renders() {
         for name in [
-            "DAC", "Fanout Buffer", "Level Shifter", "Overview",
-            "Power Supplies", "Power Supply", "SPI Isolator", "USB Power",
+            "DAC",
+            "Fanout Buffer",
+            "Level Shifter",
+            "Overview",
+            "Power Supplies",
+            "Power Supply",
+            "SPI Isolator",
+            "USB Power",
         ] {
             let path = fixture(&format!("{name}.SchDoc"));
             load_sheet(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -331,7 +396,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("broken.SchDoc");
         std::fs::write(&path, b"this is not an Altium file").unwrap();
-        assert!(matches!(load_sheet(&path), Err(crate::error::Error::Altium { .. })));
+        assert!(matches!(
+            load_sheet(&path),
+            Err(crate::error::Error::Altium { .. })
+        ));
     }
 
     #[test]

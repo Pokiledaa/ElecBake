@@ -115,11 +115,16 @@ pub(crate) mod testkit {
     }
 
     pub fn sheet(file: &str) -> RawSheet {
-        RawSheet { path: file.into(), ..Default::default() }
+        RawSheet {
+            path: file.into(),
+            ..Default::default()
+        }
     }
 
     pub fn wire(points: &[(i64, i64)]) -> RawWire {
-        RawWire { vertices: points.iter().map(|&(x, y)| pt(x, y)).collect() }
+        RawWire {
+            vertices: points.iter().map(|&(x, y)| pt(x, y)).collect(),
+        }
     }
 
     /// A component whose pins are given as (number, hot-spot position).
@@ -142,15 +147,24 @@ pub(crate) mod testkit {
     }
 
     pub fn label(text: &str, at: (i64, i64)) -> RawLabel {
-        RawLabel { text: text.into(), at: pt(at.0, at.1) }
+        RawLabel {
+            text: text.into(),
+            at: pt(at.0, at.1),
+        }
     }
 
     pub fn power(name: &str, at: (i64, i64)) -> RawPower {
-        RawPower { name: name.into(), at: pt(at.0, at.1) }
+        RawPower {
+            name: name.into(),
+            at: pt(at.0, at.1),
+        }
     }
 
     pub fn port(name: &str, a: (i64, i64), b: (i64, i64)) -> RawPort {
-        RawPort { name: name.into(), ends: [pt(a.0, a.1), pt(b.0, b.1)] }
+        RawPort {
+            name: name.into(),
+            ends: [pt(a.0, a.1), pt(b.0, b.1)],
+        }
     }
 
     pub fn symbol(name: &str, file: &str, entries: &[(&str, (i64, i64))]) -> RawSheetSymbol {
@@ -160,7 +174,10 @@ pub(crate) mod testkit {
             rect: Rect::default(),
             entries: entries
                 .iter()
-                .map(|&(n, (x, y))| RawEntry { name: n.into(), at: pt(x, y) })
+                .map(|&(n, (x, y))| RawEntry {
+                    name: n.into(),
+                    at: pt(x, y),
+                })
                 .collect(),
         }
     }

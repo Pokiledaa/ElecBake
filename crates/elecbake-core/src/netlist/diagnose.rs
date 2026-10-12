@@ -27,9 +27,12 @@ pub(super) fn diagnose(
         let id = &instances[i].id;
         for &end in &local[s].dangling {
             out.push(
-                Diagnostic::new(DiagnosticKind::DanglingWire, "wire end is not connected to anything")
-                    .on_sheet(id)
-                    .at(end),
+                Diagnostic::new(
+                    DiagnosticKind::DanglingWire,
+                    "wire end is not connected to anything",
+                )
+                .on_sheet(id)
+                .at(end),
             );
         }
         if sheet.bus_count > 0 || sheet.harness_count > 0 {
@@ -65,7 +68,10 @@ pub(super) fn diagnose(
             out.push(
                 Diagnostic::new(
                     DiagnosticKind::BusNotExpanded,
-                    format!("net '{}' touches a bus entry; its bus connections are not followed", net.name),
+                    format!(
+                        "net '{}' touches a bus entry; its bus connections are not followed",
+                        net.name
+                    ),
                 )
                 .net(&net.name),
             );
@@ -115,7 +121,10 @@ pub(super) fn diagnose(
                 placed.len()
             )
         } else {
-            format!("designator '{designator}' is used by {} components", placed.len())
+            format!(
+                "designator '{designator}' is used by {} components",
+                placed.len()
+            )
         };
         out.push(
             Diagnostic::new(DiagnosticKind::DuplicateDesignator, message)
@@ -161,7 +170,10 @@ mod tests {
     #[test]
     fn a_dangling_wire_end_is_reported_with_its_position() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (5, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (5, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
         let netlist = build(&[s], NetScope::Automatic);
         let found = of_kind(&netlist.diagnostics, DiagnosticKind::DanglingWire);
@@ -172,7 +184,10 @@ mod tests {
     #[test]
     fn buses_and_harnesses_are_reported_per_sheet_and_per_net() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (5, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (5, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
         s.bus_entries = vec![[pt(10, 0), pt(12, 2)]];
         s.bus_count = 1;
@@ -180,13 +195,20 @@ mod tests {
         let found = of_kind(&netlist.diagnostics, DiagnosticKind::BusNotExpanded);
         assert_eq!(found.len(), 2);
         assert!(found.iter().any(|d| d.nets == ["N$R1_1"]));
-        assert!(found.iter().any(|d| d.sheet.as_deref() == Some("a") && d.nets.is_empty()));
+        assert!(
+            found
+                .iter()
+                .any(|d| d.sheet.as_deref() == Some("a") && d.nets.is_empty())
+        );
     }
 
     #[test]
     fn the_same_designator_twice_is_reported() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R1", &[("1", (50, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R1", &[("1", (50, 0))]),
+        ];
         let netlist = build(&[s], NetScope::Automatic);
         let found = of_kind(&netlist.diagnostics, DiagnosticKind::DuplicateDesignator);
         assert_eq!(found.len(), 1);
@@ -196,7 +218,10 @@ mod tests {
     #[test]
     fn parts_of_one_multi_part_component_are_not_duplicates() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("U1", &[("1", (0, 0))]), component("U1", &[("5", (50, 0))])];
+        s.components = vec![
+            component("U1", &[("1", (0, 0))]),
+            component("U1", &[("5", (50, 0))]),
+        ];
         s.components[1].part_id = 2;
         let netlist = build(&[s], NetScope::Automatic);
         assert!(of_kind(&netlist.diagnostics, DiagnosticKind::DuplicateDesignator).is_empty());
@@ -213,19 +238,29 @@ mod tests {
         let netlist = build(&[s], NetScope::Automatic);
         let found = of_kind(&netlist.diagnostics, DiagnosticKind::DuplicateDesignator);
         assert_eq!(found.len(), 1);
-        assert!(found[0].message.contains("annotate"), "{}", found[0].message);
+        assert!(
+            found[0].message.contains("annotate"),
+            "{}",
+            found[0].message
+        );
         assert!(found[0].message.contains('3'));
     }
 
     #[test]
     fn a_repeated_sheet_is_reported_once_and_is_not_a_duplicate() {
         let mut parent = sheet("top.SchDoc");
-        parent.symbols = vec![symbol("A", "child.SchDoc", &[]), symbol("B", "child.SchDoc", &[])];
+        parent.symbols = vec![
+            symbol("A", "child.SchDoc", &[]),
+            symbol("B", "child.SchDoc", &[]),
+        ];
         let mut child = sheet("child.SchDoc");
         child.components = vec![component("R1", &[("1", (0, 0))])];
         child.power = vec![power("GND", (0, 0))];
         let netlist = build(&[parent, child], NetScope::Automatic);
-        assert_eq!(of_kind(&netlist.diagnostics, DiagnosticKind::RepeatedSheet).len(), 1);
+        assert_eq!(
+            of_kind(&netlist.diagnostics, DiagnosticKind::RepeatedSheet).len(),
+            1
+        );
         assert!(of_kind(&netlist.diagnostics, DiagnosticKind::DuplicateDesignator).is_empty());
     }
 }

@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub struct Point {
     pub x: i64,
     pub y: i64,
@@ -25,7 +27,10 @@ impl Rect {
     pub fn around(points: impl IntoIterator<Item = Point>) -> Option<Rect> {
         let mut points = points.into_iter();
         let first = points.next()?;
-        let mut rect = Rect { min: first, max: first };
+        let mut rect = Rect {
+            min: first,
+            max: first,
+        };
         for p in points {
             rect.min = Point::new(rect.min.x.min(p.x), rect.min.y.min(p.y));
             rect.max = Point::new(rect.max.x.max(p.x), rect.max.y.max(p.y));
@@ -73,7 +78,13 @@ mod tests {
     #[test]
     fn rect_around_points() {
         let rect = Rect::around([Point::new(3, -1), Point::new(-2, 7)]).unwrap();
-        assert_eq!(rect, Rect { min: Point::new(-2, -1), max: Point::new(3, 7) });
+        assert_eq!(
+            rect,
+            Rect {
+                min: Point::new(-2, -1),
+                max: Point::new(3, 7)
+            }
+        );
         assert_eq!(Rect::around([]), None);
     }
 }

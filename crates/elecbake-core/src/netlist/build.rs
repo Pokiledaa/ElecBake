@@ -70,7 +70,11 @@ pub struct Netlist {
 
 /// The file name at the end of a path, lower-cased, whatever separators it uses.
 fn file_key(path: &str) -> String {
-    path.rsplit(['/', '\\']).next().unwrap_or(path).trim().to_lowercase()
+    path.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .trim()
+        .to_lowercase()
 }
 
 fn file_stem(path: &str) -> String {
@@ -93,7 +97,11 @@ struct Hierarchy<'a> {
 impl Hierarchy<'_> {
     fn add(&mut self, sheet: usize, parent: Option<(usize, usize)>, open: &mut Vec<usize>) {
         let (mut id, suffix, depth) = match parent {
-            None => (file_stem(&self.sheets[sheet].path.to_string_lossy()), String::new(), 0),
+            None => (
+                file_stem(&self.sheets[sheet].path.to_string_lossy()),
+                String::new(),
+                0,
+            ),
             Some((p, s)) => {
                 let above = &self.instances[p];
                 let symbol = &self.sheets[above.sheet].symbols[s];
@@ -174,7 +182,13 @@ fn instantiate(sheets: &[RawSheet]) -> (Vec<SheetInstance>, Vec<Diagnostic>) {
         tops.push(0);
     }
 
-    let mut hierarchy = Hierarchy { sheets, by_file, uses, instances: Vec::new(), diagnostics: Vec::new() };
+    let mut hierarchy = Hierarchy {
+        sheets,
+        by_file,
+        uses,
+        instances: Vec::new(),
+        diagnostics: Vec::new(),
+    };
     for top in tops {
         hierarchy.add(top, None, &mut Vec::new());
     }
@@ -185,7 +199,10 @@ fn effective_scope(sheets: &[RawSheet], scope: NetScope) -> NetScope {
     if scope != NetScope::Automatic {
         return scope;
     }
-    if sheets.iter().any(|s| s.symbols.iter().any(|symbol| !symbol.entries.is_empty())) {
+    if sheets
+        .iter()
+        .any(|s| s.symbols.iter().any(|symbol| !symbol.entries.is_empty()))
+    {
         NetScope::Hierarchical
     } else if sheets.iter().any(|s| !s.ports.is_empty()) {
         NetScope::Flat
@@ -194,7 +211,12 @@ fn effective_scope(sheets: &[RawSheet], scope: NetScope) -> NetScope {
     }
 }
 
-fn join_by_name(groups: &mut UnionFind, seen: &mut HashMap<String, usize>, name: &str, node: usize) {
+fn join_by_name(
+    groups: &mut UnionFind,
+    seen: &mut HashMap<String, usize>,
+    name: &str,
+    node: usize,
+) {
     match seen.get(&net_key(name)) {
         Some(&other) => groups.union(node, other),
         None => {
@@ -242,16 +264,24 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
 
     if matches!(scope, NetScope::Hierarchical | NetScope::StrictHierarchical) {
         for (i, instance) in instances.iter().enumerate() {
-            let (Some(parent), Some(s)) = (instance.parent, instance.symbol) else { continue };
+            let (Some(parent), Some(s)) = (instance.parent, instance.symbol) else {
+                continue;
+            };
             let parent_sheet = instances[parent].sheet;
             let symbol = &sheets[parent_sheet].symbols[s];
             let mut used = vec![false; symbol.entries.len()];
 
             for (n, net) in local[instance.sheet].nets.iter().enumerate() {
                 for port in &net.ports {
-                    let entry = symbol.entries.iter().position(|e| net_key(&e.name) == net_key(port));
+                    let entry = symbol
+                        .entries
+                        .iter()
+                        .position(|e| net_key(&e.name) == net_key(port));
                     let above = entry.and_then(|e| {
-                        local[parent_sheet].nets.iter().position(|net| net.entries.contains(&(s, e)))
+                        local[parent_sheet]
+                            .nets
+                            .iter()
+                            .position(|net| net.entries.contains(&(s, e)))
                     });
                     match (entry, above) {
                         (Some(e), Some(above)) => {
@@ -292,7 +322,10 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     let mut members: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
     for (i, instance) in instances.iter().enumerate() {
         for n in 0..local[instance.sheet].nets.len() {
-            members.entry(groups.find(offset[i] + n)).or_default().push((i, n));
+            members
+                .entry(groups.find(offset[i] + n))
+                .or_default()
+                .push((i, n));
         }
     }
 
@@ -333,9 +366,21 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             entry.instances.push(i);
             entry.no_connect |= net.no_connect;
             entry.touches_bus |= net.touches_bus;
-            candidates[0].extend(net.power.iter().map(|name| (instance.depth, name.clone(), i)));
-            candidates[1].extend(net.labels.iter().map(|name| (instance.depth, name.clone(), i)));
-            candidates[2].extend(net.ports.iter().map(|name| (instance.depth, name.clone(), i)));
+            candidates[0].extend(
+                net.power
+                    .iter()
+                    .map(|name| (instance.depth, name.clone(), i)),
+            );
+            candidates[1].extend(
+                net.labels
+                    .iter()
+                    .map(|name| (instance.depth, name.clone(), i)),
+            );
+            candidates[2].extend(
+                net.ports
+                    .iter()
+                    .map(|name| (instance.depth, name.clone(), i)),
+            );
         }
         if entry.pins.is_empty() {
             continue;
@@ -344,12 +389,17 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
         entry.instances.sort();
         entry.instances.dedup();
 
-        match candidates.iter_mut().enumerate().find(|(_, class)| !class.is_empty()) {
+        match candidates
+            .iter_mut()
+            .enumerate()
+            .find(|(_, class)| !class.is_empty())
+        {
             Some((rank, class)) => {
                 class.sort();
                 entry.name = class[0].1.clone();
                 sources.push((rank, class[0].0, class[0].2));
-                let distinct: BTreeSet<String> = class.iter().map(|(_, name, _)| net_key(name)).collect();
+                let distinct: BTreeSet<String> =
+                    class.iter().map(|(_, name, _)| net_key(name)).collect();
                 if distinct.len() > 1 {
                     let others: Vec<&str> = class
                         .iter()
@@ -389,8 +439,13 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     for n in 0..nets.len() {
         let rivals = &sharing[&net_key(&nets[n].name)];
         let strength = |i: usize| (sources[i].0, sources[i].1);
-        let best = rivals.iter().map(|&i| strength(i)).min().expect("a net shares its own name");
-        let keeps_name = strength(n) == best && rivals.iter().filter(|&&i| strength(i) == best).count() == 1;
+        let best = rivals
+            .iter()
+            .map(|&i| strength(i))
+            .min()
+            .expect("a net shares its own name");
+        let keeps_name =
+            strength(n) == best && rivals.iter().filter(|&&i| strength(i) == best).count() == 1;
         if rivals.len() > 1 && !keeps_name {
             let sheet = &instances[sources[n].2].id;
             let renamed = format!("{}@{}", nets[n].name, sheet);
@@ -417,7 +472,12 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     nets.sort_by(|a, b| a.name.cmp(&b.name));
 
     super::diagnose::diagnose(sheets, &local, &instances, &nets, &mut diagnostics);
-    Netlist { scope, instances, nets, diagnostics }
+    Netlist {
+        scope,
+        instances,
+        nets,
+        diagnostics,
+    }
 }
 
 #[cfg(test)]
@@ -433,7 +493,11 @@ mod tests {
             .iter()
             .find(|n| n.name == name)
             .unwrap_or_else(|| panic!("no net {name}; have {:?}", names(netlist)));
-        net.pins.iter().map(|p| format!("{}.{}", p.designator, p.number)).collect::<Vec<_>>().join(" ")
+        net.pins
+            .iter()
+            .map(|p| format!("{}.{}", p.designator, p.number))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn names(netlist: &Netlist) -> Vec<&str> {
@@ -446,7 +510,12 @@ mod tests {
             .diagnostics
             .iter()
             .map(|d| d.kind)
-            .filter(|k| !matches!(k, DiagnosticKind::DanglingWire | DiagnosticKind::UnconnectedPin))
+            .filter(|k| {
+                !matches!(
+                    k,
+                    DiagnosticKind::DanglingWire | DiagnosticKind::UnconnectedPin
+                )
+            })
             .collect()
     }
 
@@ -461,7 +530,10 @@ mod tests {
     #[test]
     fn an_unnamed_net_is_named_after_its_first_pin() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R2", &[("1", (0, 0))]), component("R1", &[("2", (10, 0))])];
+        s.components = vec![
+            component("R2", &[("1", (0, 0))]),
+            component("R1", &[("2", (10, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
         let netlist = build(&[s], NetScope::Automatic);
         assert_eq!(names(&netlist), ["N$R1_2"]);
@@ -532,17 +604,26 @@ mod tests {
     #[test]
     fn automatic_scope_follows_what_the_design_uses() {
         let plain = sheet_with_pin("a.SchDoc", "R1");
-        assert_eq!(build(&[plain.clone()], NetScope::Automatic).scope, NetScope::Global);
+        assert_eq!(
+            build(std::slice::from_ref(&plain), NetScope::Automatic).scope,
+            NetScope::Global
+        );
 
         let mut with_port = plain.clone();
         with_port.ports = vec![port("X", (10, 0), (20, 0))];
-        assert_eq!(build(&[with_port.clone()], NetScope::Automatic).scope, NetScope::Flat);
+        assert_eq!(
+            build(&[with_port.clone()], NetScope::Automatic).scope,
+            NetScope::Flat
+        );
 
         let mut parent = plain;
         parent.symbols = vec![symbol("SUB", "b.SchDoc", &[("X", (10, 0))])];
         let mut child = sheet_with_pin("b.SchDoc", "R2");
         child.ports = vec![port("X", (10, 0), (20, 0))];
-        assert_eq!(build(&[parent, child], NetScope::Automatic).scope, NetScope::Hierarchical);
+        assert_eq!(
+            build(&[parent, child], NetScope::Automatic).scope,
+            NetScope::Hierarchical
+        );
     }
 
     #[test]
@@ -578,7 +659,10 @@ mod tests {
         let mut child = sheet_with_pin("child.SchDoc", "R2");
         child.ports = vec![port("OUT", (10, 0), (20, 0))];
         let netlist = build(&[parent, child], NetScope::Automatic);
-        assert_eq!(kinds(&netlist), [DiagnosticKind::UnmatchedPort, DiagnosticKind::UnmatchedPort]);
+        assert_eq!(
+            kinds(&netlist),
+            [DiagnosticKind::UnmatchedPort, DiagnosticKind::UnmatchedPort]
+        );
         let unmatched: Vec<Option<&str>> = netlist
             .diagnostics
             .iter()
@@ -606,7 +690,13 @@ mod tests {
         let all: Vec<String> = netlist
             .nets
             .iter()
-            .map(|n| n.pins.iter().map(|p| format!("{}.{}", p.designator, p.number)).collect::<Vec<_>>().join(" "))
+            .map(|n| {
+                n.pins
+                    .iter()
+                    .map(|p| format!("{}.{}", p.designator, p.number))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
             .collect();
         assert!(all.contains(&"J1.1 R1_A.1".to_string()), "{all:?}");
         assert!(all.contains(&"J1.2 R1_B.1".to_string()), "{all:?}");
@@ -646,8 +736,11 @@ mod tests {
         assert_eq!(names(&netlist), ["CLK", "CLK@top/SUB"]);
         assert_eq!(pins(&netlist, "CLK"), "R1.1");
         assert_eq!(pins(&netlist, "CLK@top/SUB"), "R2.1");
-        let renamed: Vec<&Diagnostic> =
-            netlist.diagnostics.iter().filter(|d| d.kind == DiagnosticKind::DuplicateNetName).collect();
+        let renamed: Vec<&Diagnostic> = netlist
+            .diagnostics
+            .iter()
+            .filter(|d| d.kind == DiagnosticKind::DuplicateNetName)
+            .collect();
         assert_eq!(renamed.len(), 1);
         assert_eq!(renamed[0].nets, ["CLK@top/SUB"]);
         assert_eq!(renamed[0].sheet.as_deref(), Some("top/SUB"));
@@ -673,7 +766,11 @@ mod tests {
         let netlist = build(&[s], NetScope::Automatic);
         assert_eq!(names(&netlist), ["3V3"]);
         assert_eq!(kinds(&netlist), [DiagnosticKind::MultipleNetNames]);
-        let found = netlist.diagnostics.iter().find(|d| d.kind == DiagnosticKind::MultipleNetNames).unwrap();
+        let found = netlist
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == DiagnosticKind::MultipleNetNames)
+            .unwrap();
         assert_eq!(found.nets, ["3V3"]);
     }
 
@@ -700,6 +797,10 @@ mod tests {
     #[test]
     fn no_sheets_gives_an_empty_netlist() {
         let netlist = build(&[], NetScope::Automatic);
-        assert!(netlist.nets.is_empty() && netlist.instances.is_empty() && netlist.diagnostics.is_empty());
+        assert!(
+            netlist.nets.is_empty()
+                && netlist.instances.is_empty()
+                && netlist.diagnostics.is_empty()
+        );
     }
 }

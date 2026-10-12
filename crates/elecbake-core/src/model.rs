@@ -85,7 +85,9 @@ pub struct NetWire {
 
 impl Design {
     pub fn component(&self, designator: &str) -> Option<&Component> {
-        self.components.iter().find(|c| c.designator.eq_ignore_ascii_case(designator.trim()))
+        self.components
+            .iter()
+            .find(|c| c.designator.eq_ignore_ascii_case(designator.trim()))
     }
 
     pub fn net(&self, name: &str) -> Option<&Net> {
@@ -99,17 +101,31 @@ fn sheet_extent(sheet: &RawSheet) -> Option<Rect> {
         points.push(component.location);
         points.extend(component.pins.iter().flat_map(|pin| [pin.base, pin.hot]));
     }
-    points.extend(sheet.wires.iter().flat_map(|wire| wire.vertices.iter().copied()));
+    points.extend(
+        sheet
+            .wires
+            .iter()
+            .flat_map(|wire| wire.vertices.iter().copied()),
+    );
     points.extend(sheet.junctions.iter().copied());
     points.extend(sheet.labels.iter().map(|label| label.at));
     points.extend(sheet.power.iter().map(|power| power.at));
     points.extend(sheet.ports.iter().flat_map(|port| port.ends));
-    points.extend(sheet.symbols.iter().flat_map(|symbol| [symbol.rect.min, symbol.rect.max]));
+    points.extend(
+        sheet
+            .symbols
+            .iter()
+            .flat_map(|symbol| [symbol.rect.min, symbol.rect.max]),
+    );
     Rect::around(points)
 }
 
 fn component_bbox(component: &RawComponent) -> Rect {
-    let points = component.pins.iter().flat_map(|pin| [pin.base, pin.hot]).chain([component.location]);
+    let points = component
+        .pins
+        .iter()
+        .flat_map(|pin| [pin.base, pin.hot])
+        .chain([component.location]);
     Rect::around(points).unwrap_or_default()
 }
 
@@ -130,7 +146,11 @@ pub fn assemble(
             let raw = &sheets[instance.sheet];
             Sheet {
                 id: instance.id.clone(),
-                name: raw.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                name: raw
+                    .path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
                 path: raw.path.clone(),
                 parent: instance.parent.map(|p| instances[p].id.clone()),
                 extent: sheet_extent(raw),
@@ -149,23 +169,32 @@ pub fn assemble(
     for (i, instance) in instances.iter().enumerate() {
         for (c, raw) in sheets[instance.sheet].components.iter().enumerate() {
             let designator = format!("{}{}", raw.designator, instance.suffix);
-            let component = components.entry(designator.clone()).or_insert_with(|| Component {
-                designator,
-                lib_reference: raw.lib_reference.clone(),
-                value: raw.comment.clone(),
-                footprint: raw.footprint.clone(),
-                description: raw.description.clone(),
-                parameters: raw.parameters.iter().cloned().collect(),
-                placements: Vec::new(),
-                pins: Vec::new(),
+            let component = components
+                .entry(designator.clone())
+                .or_insert_with(|| Component {
+                    designator,
+                    lib_reference: raw.lib_reference.clone(),
+                    value: raw.comment.clone(),
+                    footprint: raw.footprint.clone(),
+                    description: raw.description.clone(),
+                    parameters: raw.parameters.iter().cloned().collect(),
+                    placements: Vec::new(),
+                    pins: Vec::new(),
+                });
+            component.placements.push(Placement {
+                sheet: instance.id.clone(),
+                bbox: component_bbox(raw),
             });
-            component.placements.push(Placement { sheet: instance.id.clone(), bbox: component_bbox(raw) });
             for (p, pin) in raw.pins.iter().enumerate() {
                 component.pins.push(Pin {
                     number: pin.number.clone(),
                     name: pin.name.clone(),
                     kind: pin.kind,
-                    net: net_of.get(&(i, c, p)).copied().unwrap_or_default().to_string(),
+                    net: net_of
+                        .get(&(i, c, p))
+                        .copied()
+                        .unwrap_or_default()
+                        .to_string(),
                     sheet: instance.id.clone(),
                     at: pin.hot,
                 });
@@ -180,10 +209,17 @@ pub fn assemble(
             let mut pins: Vec<NetPin> = net
                 .pins
                 .iter()
-                .map(|pin| NetPin { designator: pin.designator.clone(), number: pin.number.clone() })
+                .map(|pin| NetPin {
+                    designator: pin.designator.clone(),
+                    number: pin.number.clone(),
+                })
                 .collect();
             pins.dedup();
-            let sheet_ids: BTreeSet<&str> = net.instances.iter().map(|&i| instances[i].id.as_str()).collect();
+            let sheet_ids: BTreeSet<&str> = net
+                .instances
+                .iter()
+                .map(|&i| instances[i].id.as_str())
+                .collect();
             Net {
                 name: net.name.clone(),
                 generated: net.generated,
@@ -192,7 +228,10 @@ pub fn assemble(
                 wires: net
                     .wires
                     .iter()
-                    .map(|(i, vertices)| NetWire { sheet: instances[*i].id.clone(), vertices: vertices.clone() })
+                    .map(|(i, vertices)| NetWire {
+                        sheet: instances[*i].id.clone(),
+                        vertices: vertices.clone(),
+                    })
                     .collect(),
             }
         })
@@ -235,17 +274,29 @@ mod tests {
 
         let sheets = [parent, child];
         let netlist = build(&sheets, NetScope::Automatic);
-        assemble("demo".into(), "top.SchDoc".into(), &sheets, netlist, Vec::new())
+        assemble(
+            "demo".into(),
+            "top.SchDoc".into(),
+            &sheets,
+            netlist,
+            Vec::new(),
+        )
     }
 
     #[test]
     fn sheets_list_instances_with_their_parents() {
         let design = two_sheet_design();
-        let sheets: Vec<(&str, Option<&str>)> =
-            design.sheets.iter().map(|s| (s.id.as_str(), s.parent.as_deref())).collect();
+        let sheets: Vec<(&str, Option<&str>)> = design
+            .sheets
+            .iter()
+            .map(|s| (s.id.as_str(), s.parent.as_deref()))
+            .collect();
         assert_eq!(sheets, [("top", None), ("top/SUB", Some("top"))]);
         assert_eq!(design.sheets[1].name, "child");
-        assert_eq!(design.sheets[0].extent.unwrap().max, crate::geom::Point::new(10, 50));
+        assert_eq!(
+            design.sheets[0].extent.unwrap().max,
+            crate::geom::Point::new(10, 50)
+        );
     }
 
     #[test]
@@ -255,7 +306,11 @@ mod tests {
         assert_eq!(r1.value.as_deref(), Some("10k"));
         assert_eq!(r1.parameters["Tolerance"], "1%");
         assert_eq!(r1.placements[0].sheet, "top");
-        let nets: Vec<(&str, &str)> = r1.pins.iter().map(|p| (p.number.as_str(), p.net.as_str())).collect();
+        let nets: Vec<(&str, &str)> = r1
+            .pins
+            .iter()
+            .map(|p| (p.number.as_str(), p.net.as_str()))
+            .collect();
         assert_eq!(nets, [("1", "IN"), ("2", "GND")]);
     }
 
@@ -263,7 +318,11 @@ mod tests {
     fn nets_list_pins_sheets_and_wires() {
         let design = two_sheet_design();
         let net = design.net("in").unwrap();
-        let pins: Vec<String> = net.pins.iter().map(|p| format!("{}.{}", p.designator, p.number)).collect();
+        let pins: Vec<String> = net
+            .pins
+            .iter()
+            .map(|p| format!("{}.{}", p.designator, p.number))
+            .collect();
         assert_eq!(pins, ["C1.1", "R1.1"]);
         assert_eq!(net.sheets, ["top", "top/SUB"]);
         assert_eq!(net.wires.len(), 2);
@@ -274,11 +333,19 @@ mod tests {
     #[test]
     fn parts_of_a_multi_part_component_become_one_component() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("U1", &[("1", (0, 0))]), component("U1", &[("5", (50, 0))])];
+        s.components = vec![
+            component("U1", &[("1", (0, 0))]),
+            component("U1", &[("5", (50, 0))]),
+        ];
         s.components[1].part_id = 2;
         let sheets = [s];
-        let design =
-            assemble("demo".into(), "a.SchDoc".into(), &sheets, build(&sheets, NetScope::Automatic), Vec::new());
+        let design = assemble(
+            "demo".into(),
+            "a.SchDoc".into(),
+            &sheets,
+            build(&sheets, NetScope::Automatic),
+            Vec::new(),
+        );
         assert_eq!(design.components.len(), 1);
         assert_eq!(design.components[0].pins.len(), 2);
         assert_eq!(design.components[0].placements.len(), 2);
@@ -287,9 +354,17 @@ mod tests {
     #[test]
     fn earlier_diagnostics_come_first_and_the_model_round_trips_through_json() {
         let sheets = [sheet("a.SchDoc")];
-        let earlier = vec![Diagnostic::new(DiagnosticKind::SheetLoadFailed, "b.SchDoc: broken")];
-        let design =
-            assemble("demo".into(), "a.SchDoc".into(), &sheets, build(&sheets, NetScope::Automatic), earlier);
+        let earlier = vec![Diagnostic::new(
+            DiagnosticKind::SheetLoadFailed,
+            "b.SchDoc: broken",
+        )];
+        let design = assemble(
+            "demo".into(),
+            "a.SchDoc".into(),
+            &sheets,
+            build(&sheets, NetScope::Automatic),
+            earlier,
+        );
         assert_eq!(design.diagnostics[0].kind, DiagnosticKind::SheetLoadFailed);
 
         let json = serde_json::to_string(&two_sheet_design()).unwrap();

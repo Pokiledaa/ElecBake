@@ -16,14 +16,27 @@ pub fn netlist_text(design: &Design) -> String {
         design.nets.len()
     );
     for net in &design.nets {
-        let pins: Vec<String> = net.pins.iter().map(|p| format!("{}.{}", p.designator, p.number)).collect();
+        let pins: Vec<String> = net
+            .pins
+            .iter()
+            .map(|p| format!("{}.{}", p.designator, p.number))
+            .collect();
         let _ = writeln!(out, "{}: {}", net.name, pins.join(" "));
     }
     if !design.diagnostics.is_empty() {
         let _ = writeln!(out, "\nDiagnostics ({}):", design.diagnostics.len());
         for diagnostic in &design.diagnostics {
-            let sheet = diagnostic.sheet.as_deref().map(|id| format!("{id}: ")).unwrap_or_default();
-            let _ = writeln!(out, "  [{}] {sheet}{}", diagnostic.kind.as_str(), diagnostic.message);
+            let sheet = diagnostic
+                .sheet
+                .as_deref()
+                .map(|id| format!("{id}: "))
+                .unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "  [{}] {sheet}{}",
+                diagnostic.kind.as_str(),
+                diagnostic.message
+            );
         }
     }
     out
@@ -39,12 +52,20 @@ mod tests {
     #[test]
     fn lists_nets_then_diagnostics() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0)), ("2", (0, 50))]), component("R2", &[("1", (10, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0)), ("2", (0, 50))]),
+            component("R2", &[("1", (10, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
         s.power = vec![power("GND", (0, 50))];
         let sheets = [s];
-        let design =
-            assemble("demo".into(), "a.SchDoc".into(), &sheets, build(&sheets, NetScope::Automatic), Vec::new());
+        let design = assemble(
+            "demo".into(),
+            "a.SchDoc".into(),
+            &sheets,
+            build(&sheets, NetScope::Automatic),
+            Vec::new(),
+        );
 
         assert_eq!(
             netlist_text(&design),
@@ -60,12 +81,19 @@ mod tests {
         let mut s = sheet("a.SchDoc");
         s.components = vec![component("R1", &[("1", (0, 0))])];
         let sheets = [s];
-        let design =
-            assemble("demo".into(), "a.SchDoc".into(), &sheets, build(&sheets, NetScope::Automatic), Vec::new());
+        let design = assemble(
+            "demo".into(),
+            "a.SchDoc".into(),
+            &sheets,
+            build(&sheets, NetScope::Automatic),
+            Vec::new(),
+        );
         let text = netlist_text(&design);
         assert!(text.contains("\nDiagnostics (1):\n"), "{text}");
         assert!(
-            text.contains("  [unconnected_pin] a: pin R1.1 is not connected and has no no-connect marker\n"),
+            text.contains(
+                "  [unconnected_pin] a: pin R1.1 is not connected and has no no-connect marker\n"
+            ),
             "{text}"
         );
     }

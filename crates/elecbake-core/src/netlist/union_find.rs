@@ -6,7 +6,9 @@ pub struct UnionFind {
 
 impl UnionFind {
     pub fn new(count: usize) -> Self {
-        Self { parent: (0..count).collect() }
+        Self {
+            parent: (0..count).collect(),
+        }
     }
 
     pub fn find(&mut self, mut x: usize) -> usize {

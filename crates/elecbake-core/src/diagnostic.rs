@@ -51,7 +51,14 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn new(kind: DiagnosticKind, message: impl Into<String>) -> Self {
-        Self { kind, message: message.into(), sheet: None, at: None, designators: Vec::new(), nets: Vec::new() }
+        Self {
+            kind,
+            message: message.into(),
+            sheet: None,
+            at: None,
+            designators: Vec::new(),
+            nets: Vec::new(),
+        }
     }
 
     pub fn on_sheet(mut self, id: &str) -> Self {

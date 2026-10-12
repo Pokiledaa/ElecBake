@@ -129,9 +129,10 @@ pub fn connect_sheet(sheet: &RawSheet) -> SheetNets {
         let key = match *item {
             Item::Label(i) => Some((false, net_key(&sheet.labels[i].text))),
             Item::Power(i) => Some((false, net_key(&sheet.power[i].name))),
-            Item::Pin(c, p) => {
-                sheet.components[c].pins[p].hidden_net.as_deref().map(|name| (false, net_key(name)))
-            }
+            Item::Pin(c, p) => sheet.components[c].pins[p]
+                .hidden_net
+                .as_deref()
+                .map(|name| (false, net_key(name))),
             Item::Port(i) => Some((true, net_key(&sheet.ports[i].name))),
             _ => None,
         };
@@ -144,8 +145,13 @@ pub fn connect_sheet(sheet: &RawSheet) -> SheetNets {
         }
     }
 
-    let on_bus_entry =
-        |vertices: &[Point]| sheet.bus_entries.iter().flatten().any(|&end| wire_contains(vertices, end));
+    let on_bus_entry = |vertices: &[Point]| {
+        sheet
+            .bus_entries
+            .iter()
+            .flatten()
+            .any(|&end| wire_contains(vertices, end))
+    };
 
     let mut index: BTreeMap<usize, usize> = BTreeMap::new();
     let mut nets: Vec<LocalNet> = Vec::new();
@@ -211,21 +217,40 @@ mod tests {
     use crate::schematic::testkit::*;
 
     /// The net holding pin `number` of component `designator`.
-    fn net_of<'a>(sheet: &RawSheet, nets: &'a SheetNets, designator: &str, number: &str) -> &'a LocalNet {
-        let c = sheet.components.iter().position(|c| c.designator == designator).unwrap();
-        let p = sheet.components[c].pins.iter().position(|p| p.number == number).unwrap();
+    fn net_of<'a>(
+        sheet: &RawSheet,
+        nets: &'a SheetNets,
+        designator: &str,
+        number: &str,
+    ) -> &'a LocalNet {
+        let c = sheet
+            .components
+            .iter()
+            .position(|c| c.designator == designator)
+            .unwrap();
+        let p = sheet.components[c]
+            .pins
+            .iter()
+            .position(|p| p.number == number)
+            .unwrap();
         nets.nets.iter().find(|n| n.pins.contains(&(c, p))).unwrap()
     }
 
     fn same_net(sheet: &RawSheet, a: (&str, &str), b: (&str, &str)) -> bool {
         let nets = connect_sheet(sheet);
-        std::ptr::eq(net_of(sheet, &nets, a.0, a.1), net_of(sheet, &nets, b.0, b.1))
+        std::ptr::eq(
+            net_of(sheet, &nets, a.0, a.1),
+            net_of(sheet, &nets, b.0, b.1),
+        )
     }
 
     #[test]
     fn pins_at_the_two_ends_of_a_wire_connect() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (10, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (10, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
         assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
     }
@@ -233,7 +258,10 @@ mod tests {
     #[test]
     fn a_pin_in_the_middle_of_a_wire_connects() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (5, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (5, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
         assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
     }
@@ -241,14 +269,20 @@ mod tests {
     #[test]
     fn pins_with_no_wire_between_them_do_not_connect() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (10, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (10, 0))]),
+        ];
         assert!(!same_net(&s, ("R1", "1"), ("R2", "1")));
     }
 
     #[test]
     fn crossing_wires_connect_only_with_a_junction() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 5))]), component("R2", &[("1", (5, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 5))]),
+            component("R2", &[("1", (5, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 5), (10, 5)]), wire(&[(5, 0), (5, 10)])];
         assert!(!same_net(&s, ("R1", "1"), ("R2", "1")));
         s.junctions = vec![pt(5, 5)];
@@ -258,7 +292,10 @@ mod tests {
     #[test]
     fn a_wire_ending_on_another_wire_connects() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 5))]), component("R2", &[("1", (5, 0))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 5))]),
+            component("R2", &[("1", (5, 0))]),
+        ];
         s.wires = vec![wire(&[(0, 5), (10, 5)]), wire(&[(5, 0), (5, 5)])];
         assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
     }
@@ -266,7 +303,10 @@ mod tests {
     #[test]
     fn a_wire_with_a_corner_connects_end_to_end() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (10, 10))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (10, 10))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0), (10, 10)])];
         assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
     }
@@ -274,14 +314,20 @@ mod tests {
     #[test]
     fn pins_touching_each_other_connect() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (3, 3))]), component("R2", &[("1", (3, 3))])];
+        s.components = vec![
+            component("R1", &[("1", (3, 3))]),
+            component("R2", &[("1", (3, 3))]),
+        ];
         assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
     }
 
     #[test]
     fn the_same_label_joins_separate_wires_ignoring_case() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (0, 50))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (0, 50))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)]), wire(&[(0, 50), (10, 50)])];
         s.labels = vec![label("VCC", (5, 0)), label("vcc", (5, 50))];
         assert!(same_net(&s, ("R1", "1"), ("R2", "1")));
@@ -293,7 +339,10 @@ mod tests {
     #[test]
     fn different_labels_stay_separate() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (0, 50))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (0, 50))]),
+        ];
         s.wires = vec![wire(&[(0, 0), (10, 0)]), wire(&[(0, 50), (10, 50)])];
         s.labels = vec![label("A", (5, 0)), label("B", (5, 50))];
         assert!(!same_net(&s, ("R1", "1"), ("R2", "1")));
@@ -302,7 +351,10 @@ mod tests {
     #[test]
     fn a_power_object_joins_a_label_of_the_same_name() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("R1", &[("1", (0, 0))]), component("R2", &[("1", (0, 50))])];
+        s.components = vec![
+            component("R1", &[("1", (0, 0))]),
+            component("R2", &[("1", (0, 50))]),
+        ];
         s.wires = vec![wire(&[(0, 50), (10, 50)])];
         s.power = vec![power("GND", (0, 0))];
         s.labels = vec![label("GND", (5, 50))];
@@ -319,7 +371,10 @@ mod tests {
             s.wires = vec![wire(&[(wire_x, 0), (wire_x, 10)])];
             s.ports = vec![port("OUT", (20, 0), (30, 0))];
             let nets = connect_sheet(&s);
-            assert!(net_of(&s, &nets, "R1", "1").ports.contains("OUT"), "wire at x={wire_x}");
+            assert!(
+                net_of(&s, &nets, "R1", "1").ports.contains("OUT"),
+                "wire at x={wire_x}"
+            );
         }
     }
 
@@ -328,7 +383,11 @@ mod tests {
         let mut s = sheet("a.SchDoc");
         s.components = vec![component("R1", &[("1", (0, 0))])];
         s.wires = vec![wire(&[(0, 0), (10, 0)])];
-        s.symbols = vec![symbol("SUB", "sub.SchDoc", &[("IN", (10, 0)), ("OUT", (10, 9))])];
+        s.symbols = vec![symbol(
+            "SUB",
+            "sub.SchDoc",
+            &[("IN", (10, 0)), ("OUT", (10, 9))],
+        )];
         let nets = connect_sheet(&s);
         assert_eq!(net_of(&s, &nets, "R1", "1").entries, [(0, 0)]);
     }
@@ -336,7 +395,10 @@ mod tests {
     #[test]
     fn a_hidden_pin_joins_its_named_net() {
         let mut s = sheet("a.SchDoc");
-        s.components = vec![component("U1", &[("7", (0, 0))]), component("C1", &[("2", (50, 50))])];
+        s.components = vec![
+            component("U1", &[("7", (0, 0))]),
+            component("C1", &[("2", (50, 50))]),
+        ];
         s.components[0].pins[0].hidden_net = Some("GND".into());
         s.power = vec![power("GND", (50, 50))];
         assert!(same_net(&s, ("U1", "7"), ("C1", "2")));

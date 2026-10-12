@@ -27,6 +27,17 @@ Net names come from power ports, net labels and ports. A net with no name is
 called `N$<designator>_<pin>`. Buses and signal harnesses are not followed yet;
 affected nets are listed under "Diagnostics".
 
+### Checking the netlist against Altium
+
+In Altium Designer, with the project open: Design » Netlist For Project » Protel.
+This writes a `.NET` file into the project's output folder. Then:
+
+    elecbake netlist MyBoard.PrjPcb --compare "Project Outputs for MyBoard/MyBoard.NET"
+
+It prints `MATCH` when every net has the same pins and names as Altium's, and lists
+the differences otherwise. Nets that Altium named itself (`Net…`) may have a
+different name in ElecBake.
+
 ## Credits
 
 Altium file reading is provided by

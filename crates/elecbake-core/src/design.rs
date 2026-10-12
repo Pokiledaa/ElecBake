@@ -11,11 +11,15 @@ use crate::netlist::{NetScope, build};
 use crate::schematic::RawSheet;
 
 fn extension(path: &Path) -> String {
-    path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default()
+    path.extension()
+        .map(|ext| ext.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 fn file_key(path: &Path) -> String {
-    path.file_name().map(|name| name.to_string_lossy().to_lowercase()).unwrap_or_default()
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// Load an Altium project (`.PrjPcb`) or a schematic (`.SchDoc`) with its child sheets.
@@ -42,7 +46,10 @@ pub fn load_design(path: &Path) -> Result<Design> {
             (project.name, project.schematics, scope, true)
         }
         "schdoc" => {
-            let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
             (name, vec![path.to_path_buf()], NetScope::Automatic, false)
         }
         _ => return Err(Error::Unsupported(path.to_path_buf())),
@@ -68,7 +75,10 @@ pub fn load_design(path: &Path) -> Result<Design> {
                 sheets.push(sheet);
             }
             Err(error) => {
-                diagnostics.push(Diagnostic::new(DiagnosticKind::SheetLoadFailed, error.to_string()));
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticKind::SheetLoadFailed,
+                    error.to_string(),
+                ));
                 first_error.get_or_insert(error);
             }
         }
@@ -79,5 +89,11 @@ pub fn load_design(path: &Path) -> Result<Design> {
     }
 
     let netlist = build(&sheets, scope);
-    Ok(assemble(name, path.to_path_buf(), &sheets, netlist, diagnostics))
+    Ok(assemble(
+        name,
+        path.to_path_buf(),
+        &sheets,
+        netlist,
+        diagnostics,
+    ))
 }

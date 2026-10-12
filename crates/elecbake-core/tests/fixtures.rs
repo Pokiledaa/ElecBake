@@ -7,7 +7,11 @@ use elecbake_core::netlist::NetScope;
 use elecbake_core::{Design, load_design};
 
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/altiumsharp")).join(name)
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/altiumsharp"
+    ))
+    .join(name)
 }
 
 fn pins(design: &Design, net: &str) -> Vec<String> {
@@ -29,12 +33,20 @@ fn a_top_sheet_pulls_in_its_child_sheets() {
     ids.sort();
     assert_eq!(
         ids,
-        ["Overview", "Overview/DAC", "Overview/LDAC_SHIFT", "Overview/PSU", "Overview/SPI_SHIFT"]
+        [
+            "Overview",
+            "Overview/DAC",
+            "Overview/LDAC_SHIFT",
+            "Overview/PSU",
+            "Overview/SPI_SHIFT"
+        ]
     );
     assert!(
         !design.diagnostics.iter().any(|d| matches!(
             d.kind,
-            DiagnosticKind::SheetLoadFailed | DiagnosticKind::MissingSheet | DiagnosticKind::HierarchyCycle
+            DiagnosticKind::SheetLoadFailed
+                | DiagnosticKind::MissingSheet
+                | DiagnosticKind::HierarchyCycle
         )),
         "{:#?}",
         design.diagnostics
@@ -56,8 +68,16 @@ fn a_sheet_used_twice_gives_two_sets_of_components() {
     assert!(design.component("IC5_SPI_SHIFT").is_some());
     assert!(design.component("IC5_LDAC_SHIFT").is_some());
     assert!(design.component("IC5").is_none());
-    assert_eq!(design.component("IC5_SPI_SHIFT").unwrap().value.as_deref(), Some("TXU0304PWR"));
-    assert!(design.diagnostics.iter().any(|d| d.kind == DiagnosticKind::RepeatedSheet));
+    assert_eq!(
+        design.component("IC5_SPI_SHIFT").unwrap().value.as_deref(),
+        Some("TXU0304PWR")
+    );
+    assert!(
+        design
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::RepeatedSheet)
+    );
 }
 
 #[test]
@@ -73,15 +93,27 @@ fn every_pin_belongs_to_a_named_net() {
     let design = load_design(&fixture("Overview.SchDoc")).unwrap();
     for component in &design.components {
         for pin in &component.pins {
-            assert!(design.net(&pin.net).is_some(), "{}.{} -> '{}'", component.designator, pin.number, pin.net);
+            assert!(
+                design.net(&pin.net).is_some(),
+                "{}.{} -> '{}'",
+                component.designator,
+                pin.number,
+                pin.net
+            );
         }
     }
 }
 
 #[test]
 fn every_standalone_sample_sheet_loads_as_a_design() {
-    for name in ["Fanout Buffer", "Power Supplies", "SPI Isolator", "USB Power"] {
-        let design = load_design(&fixture(&format!("{name}.SchDoc"))).unwrap_or_else(|e| panic!("{name}: {e}"));
+    for name in [
+        "Fanout Buffer",
+        "Power Supplies",
+        "SPI Isolator",
+        "USB Power",
+    ] {
+        let design = load_design(&fixture(&format!("{name}.SchDoc")))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(!design.components.is_empty(), "{name}");
         assert!(!design.nets.is_empty(), "{name}");
     }
@@ -91,7 +123,11 @@ fn every_standalone_sample_sheet_loads_as_a_design() {
 fn a_project_file_loads_its_schematics_and_reports_missing_ones() {
     let dir = tempfile::tempdir().unwrap();
     for name in ["Overview", "DAC", "Power Supply", "Level Shifter"] {
-        std::fs::copy(fixture(&format!("{name}.SchDoc")), dir.path().join(format!("{name}.SchDoc"))).unwrap();
+        std::fs::copy(
+            fixture(&format!("{name}.SchDoc")),
+            dir.path().join(format!("{name}.SchDoc")),
+        )
+        .unwrap();
     }
     let project = dir.path().join("Board.PrjPcb");
     std::fs::write(
@@ -119,14 +155,32 @@ fn a_project_file_loads_its_schematics_and_reports_missing_ones() {
 fn a_broken_child_sheet_does_not_stop_the_rest_from_loading() {
     let dir = tempfile::tempdir().unwrap();
     for name in ["Overview", "DAC", "Power Supply"] {
-        std::fs::copy(fixture(&format!("{name}.SchDoc")), dir.path().join(format!("{name}.SchDoc"))).unwrap();
+        std::fs::copy(
+            fixture(&format!("{name}.SchDoc")),
+            dir.path().join(format!("{name}.SchDoc")),
+        )
+        .unwrap();
     }
-    std::fs::write(dir.path().join("Level Shifter.SchDoc"), b"not an Altium file").unwrap();
+    std::fs::write(
+        dir.path().join("Level Shifter.SchDoc"),
+        b"not an Altium file",
+    )
+    .unwrap();
 
     let design = load_design(&dir.path().join("Overview.SchDoc")).unwrap();
     assert!(design.component("J2").is_some());
-    assert!(design.diagnostics.iter().any(|d| d.kind == DiagnosticKind::SheetLoadFailed));
-    assert!(design.diagnostics.iter().any(|d| d.kind == DiagnosticKind::MissingSheet));
+    assert!(
+        design
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::SheetLoadFailed)
+    );
+    assert!(
+        design
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::MissingSheet)
+    );
 }
 
 #[test]
