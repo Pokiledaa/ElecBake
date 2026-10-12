@@ -45,4 +45,4 @@ Altium file reading is provided by
 Sample schematics under `fixtures/altiumsharp/` come from
 [AltiumSharp](https://github.com/issus/AltiumSharp) (Apache-2.0).
 
-The license for ElecBake itself has not been chosen yet.
+ElecBake is licensed under the GNU General Public License v3.0; see `LICENSE`.

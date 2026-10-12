@@ -58,10 +58,10 @@ cargo run -p elecbake -- render "fixtures/altiumsharp/Overview.SchDoc" -o out/
 
 ## Licensing and third-party code
 
-The license for ElecBake has not been chosen; this is deliberate. Code from other projects,
-including GPL ones, may be copied and adapted. Every time that happens, record the source,
-commit and license in `docs/third-party-code.md`. Do not add a LICENSE file or `license`
-fields until the owner decides.
+The repository carries a GPL-3.0 `LICENSE` file. Code from other projects, including GPL
+ones, may be copied and adapted. Every time that happens, record the source, commit and
+license in `docs/third-party-code.md`. The owner may revisit the license later; do not
+change `LICENSE` or add `license` fields to the manifests without being asked.
 
 ## Testing with real designs
 

@@ -1,7 +1,7 @@
 # Third-party code and files in this repository
 
-ElecBake's own license has not been chosen yet. This file records everything copied
-or adapted from elsewhere, so that the choice can be made with the full picture.
+ElecBake is licensed under GPL-3.0 (see `LICENSE`). This file records everything copied
+or adapted from elsewhere, with its source and license.
 
 | What | Where it lives | Source | License |
 |---|---|---|---|
