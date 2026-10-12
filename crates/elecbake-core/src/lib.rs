@@ -5,3 +5,8 @@ pub mod schematic;
 pub mod altium;
 pub mod netlist;
 pub mod diagnostic;
+pub mod design;
+pub mod model;
+
+pub use design::load_design;
+pub use model::Design;
