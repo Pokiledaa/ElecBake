@@ -1,6 +1,7 @@
 //! Derives electrical connectivity from drawn schematic objects.
 
 pub mod build;
+mod diagnose;
 pub mod sheet;
 pub mod union_find;
 

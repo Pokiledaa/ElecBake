@@ -407,6 +407,7 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     }
     nets.sort_by(|a, b| a.name.cmp(&b.name));
 
+    super::diagnose::diagnose(sheets, &local, &instances, &nets, &mut diagnostics);
     Netlist { scope, instances, nets, diagnostics }
 }
 
@@ -430,8 +431,14 @@ mod tests {
         netlist.nets.iter().map(|n| n.name.as_str()).collect()
     }
 
+    /// Diagnostic kinds, leaving out the per-pin and per-wire findings of `diagnose`.
     fn kinds(netlist: &Netlist) -> Vec<DiagnosticKind> {
-        netlist.diagnostics.iter().map(|d| d.kind).collect()
+        netlist
+            .diagnostics
+            .iter()
+            .map(|d| d.kind)
+            .filter(|k| !matches!(k, DiagnosticKind::DanglingWire | DiagnosticKind::UnconnectedPin))
+            .collect()
     }
 
     /// A sheet with one resistor pin wired to a point, for hanging names on.
@@ -542,7 +549,7 @@ mod tests {
         let ids: Vec<&str> = netlist.instances.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["top", "top/SUB"]);
         assert_eq!(netlist.instances[1].parent, Some(0));
-        assert!(netlist.diagnostics.is_empty(), "{:?}", netlist.diagnostics);
+        assert!(kinds(&netlist).is_empty(), "{:?}", netlist.diagnostics);
     }
 
     #[test]
@@ -563,8 +570,13 @@ mod tests {
         child.ports = vec![port("OUT", (10, 0), (20, 0))];
         let netlist = build(&[parent, child], NetScope::Automatic);
         assert_eq!(kinds(&netlist), [DiagnosticKind::UnmatchedPort, DiagnosticKind::UnmatchedPort]);
-        assert_eq!(netlist.diagnostics[0].sheet.as_deref(), Some("top/SUB"));
-        assert_eq!(netlist.diagnostics[1].sheet.as_deref(), Some("top"));
+        let unmatched: Vec<Option<&str>> = netlist
+            .diagnostics
+            .iter()
+            .filter(|d| d.kind == DiagnosticKind::UnmatchedPort)
+            .map(|d| d.sheet.as_deref())
+            .collect();
+        assert_eq!(unmatched, [Some("top/SUB"), Some("top")]);
     }
 
     #[test]
@@ -617,7 +629,8 @@ mod tests {
         let netlist = build(&[s], NetScope::Automatic);
         assert_eq!(names(&netlist), ["3V3"]);
         assert_eq!(kinds(&netlist), [DiagnosticKind::MultipleNetNames]);
-        assert_eq!(netlist.diagnostics[0].nets, ["3V3"]);
+        let found = netlist.diagnostics.iter().find(|d| d.kind == DiagnosticKind::MultipleNetNames).unwrap();
+        assert_eq!(found.nets, ["3V3"]);
     }
 
     #[test]
