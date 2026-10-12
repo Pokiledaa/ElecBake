@@ -10,3 +10,4 @@ pub mod model;
 
 pub use design::load_design;
 pub use model::Design;
+pub mod text;

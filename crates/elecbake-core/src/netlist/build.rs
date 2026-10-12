@@ -297,6 +297,9 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
     }
 
     let mut nets: Vec<NetEntry> = Vec::new();
+    // Where each net's name came from: (class, sheet depth, instance). A lower class
+    // and a shallower sheet make a stronger name. Parallel to `nets`.
+    let mut sources: Vec<(usize, usize, usize)> = Vec::new();
     for parts in members.into_values() {
         let mut entry = NetEntry {
             name: String::new(),
@@ -307,8 +310,9 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             no_connect: false,
             touches_bus: false,
         };
-        // Candidate names by class: power, label, port. Each with the depth of its sheet.
-        let mut candidates: [Vec<(usize, String)>; 3] = Default::default();
+        // Candidate names by class: power, label, port. Each with the depth and index
+        // of the sheet instance it is on.
+        let mut candidates: [Vec<(usize, String, usize)>; 3] = Default::default();
 
         for &(i, n) in &parts {
             let instance = &instances[i];
@@ -329,9 +333,9 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             entry.instances.push(i);
             entry.no_connect |= net.no_connect;
             entry.touches_bus |= net.touches_bus;
-            candidates[0].extend(net.power.iter().map(|name| (instance.depth, name.clone())));
-            candidates[1].extend(net.labels.iter().map(|name| (instance.depth, name.clone())));
-            candidates[2].extend(net.ports.iter().map(|name| (instance.depth, name.clone())));
+            candidates[0].extend(net.power.iter().map(|name| (instance.depth, name.clone(), i)));
+            candidates[1].extend(net.labels.iter().map(|name| (instance.depth, name.clone(), i)));
+            candidates[2].extend(net.ports.iter().map(|name| (instance.depth, name.clone(), i)));
         }
         if entry.pins.is_empty() {
             continue;
@@ -340,15 +344,16 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
         entry.instances.sort();
         entry.instances.dedup();
 
-        match candidates.iter_mut().find(|class| !class.is_empty()) {
-            Some(class) => {
+        match candidates.iter_mut().enumerate().find(|(_, class)| !class.is_empty()) {
+            Some((rank, class)) => {
                 class.sort();
                 entry.name = class[0].1.clone();
-                let distinct: BTreeSet<String> = class.iter().map(|(_, name)| net_key(name)).collect();
+                sources.push((rank, class[0].0, class[0].2));
+                let distinct: BTreeSet<String> = class.iter().map(|(_, name, _)| net_key(name)).collect();
                 if distinct.len() > 1 {
                     let others: Vec<&str> = class
                         .iter()
-                        .map(|(_, name)| name.as_str())
+                        .map(|(_, name, _)| name.as_str())
                         .filter(|name| net_key(name) != net_key(&entry.name))
                         .collect();
                     diagnostics.push(
@@ -367,40 +372,44 @@ pub fn build(sheets: &[RawSheet], scope: NetScope) -> Netlist {
             None => {
                 entry.name = format!("N${}_{}", entry.pins[0].designator, entry.pins[0].number);
                 entry.generated = true;
+                sources.push((candidates.len(), 0, entry.pins[0].instance));
             }
         }
         nets.push(entry);
     }
 
     // Separate nets must not share a name: it is the identifier everything else uses.
-    let mut count: HashMap<String, usize> = HashMap::new();
-    for net in &nets {
-        *count.entry(net_key(&net.name)).or_default() += 1;
+    // When names collide, the single strongest one keeps the plain name and the others
+    // are qualified with the sheet their name came from. With no single strongest, all are.
+    let mut sharing: HashMap<String, Vec<usize>> = HashMap::new();
+    for (n, net) in nets.iter().enumerate() {
+        sharing.entry(net_key(&net.name)).or_default().push(n);
     }
     let mut taken: BTreeSet<String> = BTreeSet::new();
-    for net in &mut nets {
-        if count[&net_key(&net.name)] > 1 {
-            let shallowest = net
-                .instances
-                .iter()
-                .copied()
-                .min_by_key(|&i| (instances[i].depth, i))
-                .expect("a net with pins appears on at least one sheet");
-            let renamed = format!("{}@{}", net.name, instances[shallowest].id);
+    for n in 0..nets.len() {
+        let rivals = &sharing[&net_key(&nets[n].name)];
+        let strength = |i: usize| (sources[i].0, sources[i].1);
+        let best = rivals.iter().map(|&i| strength(i)).min().expect("a net shares its own name");
+        let keeps_name = strength(n) == best && rivals.iter().filter(|&&i| strength(i) == best).count() == 1;
+        if rivals.len() > 1 && !keeps_name {
+            let sheet = &instances[sources[n].2].id;
+            let renamed = format!("{}@{}", nets[n].name, sheet);
             diagnostics.push(
                 Diagnostic::new(
                     DiagnosticKind::DuplicateNetName,
                     format!(
-                        "the name '{}' is used by separate nets; this one is shown as '{renamed}'. \
-                         Altium may merge same-named nets on the PCB",
-                        net.name
+                        "the name '{}' is used by {} separate nets; this one is shown as '{renamed}'",
+                        nets[n].name,
+                        rivals.len()
                     ),
                 )
-                .on_sheet(&instances[shallowest].id)
+                .on_sheet(sheet)
                 .net(&renamed),
             );
-            net.name = renamed;
+            nets[n].name = renamed;
         }
+    }
+    for net in &mut nets {
         while !taken.insert(net_key(&net.name)) {
             net.name.push('\'');
         }
@@ -620,6 +629,41 @@ mod tests {
         let netlist = build(&[only], NetScope::Automatic);
         assert_eq!(kinds(&netlist), [DiagnosticKind::HierarchyCycle]);
         assert_eq!(netlist.instances.len(), 1);
+    }
+
+    #[test]
+    fn a_stronger_name_is_kept_and_the_weaker_one_is_qualified_by_its_sheet() {
+        // The parent has a real net labelled CLK. The child's CLK port reaches an entry
+        // that is wired to nothing on the parent, so it is a separate net that would
+        // also be called CLK.
+        let mut parent = sheet_with_pin("top.SchDoc", "R1");
+        parent.labels = vec![label("CLK", (5, 0))];
+        parent.symbols = vec![symbol("SUB", "child.SchDoc", &[("CLK", (500, 500))])];
+        let mut child = sheet_with_pin("child.SchDoc", "R2");
+        child.ports = vec![port("CLK", (10, 0), (20, 0))];
+
+        let netlist = build(&[parent, child], NetScope::Automatic);
+        assert_eq!(names(&netlist), ["CLK", "CLK@top/SUB"]);
+        assert_eq!(pins(&netlist, "CLK"), "R1.1");
+        assert_eq!(pins(&netlist, "CLK@top/SUB"), "R2.1");
+        let renamed: Vec<&Diagnostic> =
+            netlist.diagnostics.iter().filter(|d| d.kind == DiagnosticKind::DuplicateNetName).collect();
+        assert_eq!(renamed.len(), 1);
+        assert_eq!(renamed[0].nets, ["CLK@top/SUB"]);
+        assert_eq!(renamed[0].sheet.as_deref(), Some("top/SUB"));
+    }
+
+    #[test]
+    fn equally_strong_duplicate_names_are_each_qualified_by_their_own_sheet() {
+        let mut parent = sheet("top.SchDoc");
+        parent.symbols = vec![
+            symbol("A", "child.SchDoc", &[("IN", (100, 0))]),
+            symbol("B", "child.SchDoc", &[("IN", (100, 50))]),
+        ];
+        let mut child = sheet_with_pin("child.SchDoc", "R1");
+        child.ports = vec![port("IN", (10, 0), (20, 0))];
+        let netlist = build(&[parent, child], NetScope::Automatic);
+        assert_eq!(names(&netlist), ["IN@top/A", "IN@top/B"]);
     }
 
     #[test]
