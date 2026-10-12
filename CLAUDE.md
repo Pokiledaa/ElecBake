@@ -4,13 +4,14 @@ An AI copilot for electronic circuit design, starting with Altium Designer. Writ
 Scope is circuit design: reading and reviewing schematics, part selection, calculations,
 simulation, and board advice. PCB routing is out of scope.
 
-The design is in `docs/superpowers/specs/2026-10-12-elecbake-foundation-design.md`.
+The design spec and implementation plans are kept locally under `docs/superpowers/`,
+which git ignores. Read them there if present.
 
 ## Commits
 
 - Commit as the repository owner only. Never add `Co-Authored-By` lines, "Generated with"
   lines, or any other AI or model attribution to commit messages or pull requests.
-- `docs/superpowers/plans/` is ignored by git. Implementation plans stay local; do not
+- `docs/superpowers/` (specs and plans) is ignored by git. Those files stay local; do not
   force-add them.
 - Commit or push only when asked. Nothing is pushed to GitHub without an explicit request.
 
@@ -26,7 +27,7 @@ crates/elecbake-core/   library: Altium loading, netlist, design model
   src/compare.rs        check against a Protel netlist exported from Altium
 crates/elecbake/        the `elecbake` command-line program
 fixtures/altiumsharp/   open sample schematics used by tests
-docs/                   spec, engine gaps, third-party record
+docs/                   engine gaps, third-party record
 ```
 
 ## Commands
